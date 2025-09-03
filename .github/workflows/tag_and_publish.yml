@@ -1,9 +1,10 @@
 name: Tag and Publish
-on:
-  push:
-    branches:
-      - main
-      - dev
+# To restore this workflow, uncomment the lines below
+#on:
+#  push:
+#    branches:
+#      - main
+#      - dev
 jobs:
   test-lint-and-type-check:
     uses: AllenNeuralDynamics/aind-python-library-template/.github/workflows/test_lint_type.yml@main
