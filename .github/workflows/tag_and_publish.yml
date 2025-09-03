@@ -1,0 +1,52 @@
+name: Tag and Publish
+on:
+  push:
+    branches:
+      - main
+      - dev
+jobs:
+  test-lint-and-type-check:
+    uses: AllenNeuralDynamics/aind-python-library-template/.github/workflows/test_lint_type.yml@main
+  tag:
+    runs-on: self-hosted-good 
+    needs: test-lint-and-type-check
+    env: 
+      UV_PYTHON_INSTALL_DIR: C:\ProgramData\AIBS_MPE\uv_python
+      UV_TOOL_DIR: C:\ProgramData\AIBS_MPE\uv_python
+    steps:
+      - name: Checkout code 
+        uses: actions/checkout@v4
+        with: 
+          repository: ${{ github.event.pull_request.head.repo.full_name }} 
+          ref: ${{ github.event.pull_request.head.ref }} 
+      - name: Bump version and push tag
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }} 
+          append_to_pre_release_tag: 'dev'
+          pre_release_branches: dev
+          # custom_release_rules: 'fix:patch,feat:minor,breaking:major'
+      - name: Install UV 
+        uses: astral-sh/setup-uv@v5
+      - name: Update Version in pyproject.toml
+        run: uvx --from=toml-cli toml set --toml-path=pyproject.toml project.version ${{ steps.tag_version.outputs.new_version }} 
+      - name: Commit and push pyproject.toml version bump
+        uses: EndBug/add-and-commit@v9
+        with:
+          default_author: github_actions
+          message: "ci: version bump"
+          push: true
+  publish: 
+    runs-on: self-hosted-good 
+    needs: tag
+    env: 
+      UV_PYTHON_INSTALL_DIR: C:\ProgramData\AIBS_MPE\uv_python
+      UV_TOOL_DIR: C:\ProgramData\AIBS_MPE\uv_python
+    steps:
+      - name: Install UV 
+        uses: astral-sh/setup-uv@v5
+      - name: Build Project
+        run: uv build
+      - name: Publish Project to eng-tools devpi
+        run: uv publish --publish-url http://eng-tools:3141/aibs/packages --username aibs --password aibs

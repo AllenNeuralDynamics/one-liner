@@ -1,0 +1,31 @@
+name: Test Lint and Type Check
+on:
+  workflow_call:
+  pull_request: 
+    branches: 
+      - main
+      - dev
+    types: [opened, synchronize, reopened, ready_for_review]
+jobs: 
+  tests-lint-and-type-check: 
+    runs-on: self-hosted-good
+    env: 
+      UV_PYTHON_INSTALL_DIR: C:\ProgramData\AIBS_MPE\uv_python
+      UV_TOOL_DIR: C:\ProgramData\AIBS_MPE\uv_python
+    strategy: 
+      matrix:
+        python-version: [ '3.11', '3.12' ]
+    steps: 
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Install UV - python version set to ${{ matrix.python-version }} 
+      uses: astral-sh/setup-uv@v5
+      with:
+        python-version: ${{ matrix.python-version }} 
+    - name: Unit test with PyTest  
+      run: uv run pytest tests/
+    - name: Lint with Ruff 
+      run: uv run ruff check
+    - name: Type check with mypy 
+      run: |
+        uv run mypy src/mypackage --strict
