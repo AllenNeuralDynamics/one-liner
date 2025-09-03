@@ -1,25 +1,44 @@
-# aind-python-library-template
+# one-liner
 [![License](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
 
+A ZMQ-based Router pattern for interacting with remote python objects.
 
-This is a repository template to quickly setup a python library project. This repository utilizes a tool called **uv** to handle all dependency and package management. For more information on this tool go to the [uv wiki](https://docs.astral.sh/uv/). 
+The router pattern provides a bridge between decoupled applications from interfaces (i.e: the model from the view).
+This separation provides several advantages:
+* GUIs can be developed independently of standalone projects.
+* GUIs can run on separate processes or on different machines altogether, providing more flexibility where some machines are resource-constrained.
+* Failures are siloed. A GUI can crash independent of the application it is interfacing with.
 
-##  Getting Started
+## Package Installation
 
-- To use this template, click the green ``Use this template`` button and ``Create new repository``.
-- [Install uv](https://docs.astral.sh/uv/getting-started/installation/)
+
+to install this package, in the root directory, run
+```bash
+pip install -e .
+```
+
+To install this package with supplementary dependencies for writing documentation, in the root directory, run:
+```bash
+pip install -e .[dev]
+```
+
+To install *and develop this package in its own environment*, in the root directory, run:
+```bash
+uv sync
+uv pip install -e .  # or .[dev]
+```
 
 ## Tools
 
-### Package/Project Management 
+### Package/Project Management
 
-This project utilizes [uv](https://docs.astral.sh/uv/) to handle installing dependencies as well as setting up environments for this project. It replaces tool like pip, poetry, virtualenv, and conda. 
+This project utilizes [uv](https://docs.astral.sh/uv/) to handle installing dependencies as well as setting up environments for this project. It replaces tool like pip, poetry, virtualenv, and conda.
 
-This project also uses [tox](https://tox.wiki/en/latest/index.html) for orchestrating multiple testing environments that mimics the github actions CI/CD so that you can test the workflows locally on your machine before pushing changes. 
+This project also uses [tox](https://tox.wiki/en/latest/index.html) for orchestrating multiple testing environments that mimics the github actions CI/CD so that you can test the workflows locally on your machine before pushing changes.
 
 ### Code Quality Check
 
-The following are tools used to ensure code quality in this project. 
+The following are tools used to ensure code quality in this project.
 
 - Unit Testing
 
