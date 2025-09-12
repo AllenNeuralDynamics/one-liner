@@ -32,5 +32,8 @@ def test_request_and_reply():
     server.run()
 
     data = client.call("sensors", "get_data", 0)
-    assert 0 in data
-    assert 0.0 <= data[0] <= 5.0
+    try:
+        assert 0 in data
+        assert 0.0 <= data[0] <= 5.0
+    finally:
+        server.stop()

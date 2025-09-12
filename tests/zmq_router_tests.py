@@ -23,6 +23,7 @@ class SensorArray:
 
 def test_server_creation():
     server = RouterServer()  # Create a server.
+    server.close()
 
 
 def test_many_client_receive():

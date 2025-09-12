@@ -23,6 +23,7 @@ class SensorArray:
 
 def test_server_creation():
     server = ZMQStreamServer()  # Create a server.
+    server.close()
 
 
 def test_server_broadcast():
@@ -62,7 +63,10 @@ def test_live_add_remove_broadcast():
     server.add(10, sensors.get_data, sensor_index)
     server.remove(sensors.get_data)
     # FIXME: thread should exit after removing the only periodic function.
-    assert server.func_params == {}
-    #assert server.calls_by_frequency == {}
-    #assert server.threads.get(10, None) == None  # might need a delay.
-
+    try:
+        assert server.func_params == {}
+        #assert server.calls_by_frequency == {}
+        #assert server.threads.get(10, None) == None  # might need a delay.
+    finally:
+        server.close()
+        client.close()
