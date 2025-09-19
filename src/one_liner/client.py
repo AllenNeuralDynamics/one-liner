@@ -90,9 +90,6 @@ class ZMQStreamClient:
 
 
     def close(self):
-        if self.receive_worker and self.receive_worker.is_alive():
-            self.keep_receiving.clear()
-            self.receive_worker.join()
         for name, socket in self.sub_sockets.items():
             socket.close()
 
