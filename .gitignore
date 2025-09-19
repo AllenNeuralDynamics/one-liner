@@ -140,3 +140,8 @@ dmypy.json
 
 # MacOs
 **/.DS_Store
+
+# Vim
+*.swp
+*.back
+*.swo
