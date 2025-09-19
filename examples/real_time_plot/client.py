@@ -13,21 +13,28 @@ from random import random
 from time import perf_counter, sleep
 from math import sin, pi
 
-from server import SAMPLE_INTERVAL_S
+from server import SAMPLE_INTERVAL_S, NUM_STREAMS
 
 SAMPLES = 500
 PLOT_INTERVAL_S = 1/60.
 
 if __name__ == "__main__":
     client = ZMQStreamClient()
-    client.configure_stream("1hz_sine", storage_type="queue")
-
-    x_buffer = deque(maxlen=SAMPLES)
-    buffer = deque(maxlen=SAMPLES)
+    for i in range(NUM_STREAMS):
+        client.configure_stream(f"1hz_sine[{i}]", storage_type="queue")
 
     # Create figure and axes
     fig, ax = plt.subplots()
-    line, = ax.plot([], [], 'r-') # Initialize an empty line
+
+    x_buffers = []
+    y_buffers = []
+    lines = []
+    for i in range(NUM_STREAMS):
+        x_buffers.append(deque(maxlen=SAMPLES))
+        y_buffers.append(deque(maxlen=SAMPLES))
+
+        line, = ax.plot([], [], 'r-') # Initialize an empty line
+        lines.append(line)
 
     # Set axis limits (important for real-time plotting)
     ax.set_xlim(0, SAMPLES)
@@ -35,25 +42,22 @@ if __name__ == "__main__":
 
     # Plot one stream.
     def animate(i):
-        while True:
-            try:  # pull everything out.
-                data_pt = client.get("1hz_sine")
-                if len(x_buffer) and data_pt[0] - x_buffer[-1] >= 2*SAMPLE_INTERVAL_S:
-                    print(f"dropped packet! delta = {data_pt[0] - x_buffer[-1]:.3f}")
-                x_buffer.append(data_pt[0])
-                buffer.append(data_pt[1])
-            except zmq.Again:
-                if len(buffer):
+        for i in range(NUM_STREAMS):
+            while True:
+                try:  # pull everything out.
+                    data_pt = client.get(f"1hz_sine[{i}]")
+                    if len(x_buffers[i]) and data_pt[0] - x_buffers[i][-1] >= 2*SAMPLE_INTERVAL_S:
+                        print(f"1hz_sine[{i}] source_slow or receiver dropped "
+                              f"packet! Δ = {data_pt[0] - x_buffers[i][-1]:.3f}[s]")
+                    x_buffers[i].append(data_pt[0])
+                    y_buffers[i].append(data_pt[1])
+                except zmq.Again:
                     break
-                else:
-                    continue
-        # Update the line data
-        #line.set_xdata(range(len(buffer)))
-        line.set_xdata(x_buffer)
-        line.set_ydata(buffer)
-        ax.set_xlim(x_buffer[0], x_buffer[-1])
-        return line,
-
+            # Update the line data
+            lines[i].set_xdata(x_buffers[i])
+            lines[i].set_ydata(y_buffers[i])
+        ax.set_xlim(x_buffers[0][0], x_buffers[0][-1])
+        return lines
     try:
         # Create the animation
         ani = animation.FuncAnimation(fig, animate, interval=PLOT_INTERVAL_S, blit=True)
