@@ -13,6 +13,8 @@ dependencies = [
 [project.optional-dependencies]
 examples = [
     "gr>=1.30.0",
+    "matplotlib>=3.10.6",
+    "pyqt6>=6.9.1",
 ]
 
 [tool.pytest.ini_options]

@@ -81,6 +81,8 @@ class ZMQStreamClient:
         socket.subscribe(name)
         if storage_type == "cache":
             socket.setsockopt(zmq.CONFLATE, 1)  # last msg only.
+        else:
+            socket.setsockopt(zmq.RCVHWM, 1000) # Buffer up to 1000 msgs.
         self.sub_sockets[name] = socket
 
     def get(self, stream_name: str) -> Tuple[float, any]:
