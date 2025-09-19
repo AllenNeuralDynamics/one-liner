@@ -6,6 +6,7 @@ import pickle
 import zmq
 from threading import Thread, Event, Lock
 from time import sleep
+from time import perf_counter as now
 from typing import Callable
 
 
@@ -95,7 +96,7 @@ class ZMQStreamServer:
         self.socket = self.context.socket(zmq.PUB)
         self.socket.bind(f"tcp://*:{self.port}")
 
-        self.func_params: Dict[Callable, Tuple] = {}
+        self.func_signature: Dict[str, Tuple] = {}
         self.calls_by_frequency: Dict[float, set] = {}
         self.call_frequencies: Dict[Callable, float] = {}
         self.calls_lock = Lock()
@@ -103,7 +104,7 @@ class ZMQStreamServer:
         self.keep_broadcasting = Event()
         self.keep_broadcasting.set()
 
-    def add(self, frequency_hz: float, func: Callable, *args, **kwargs):
+    def add(self, name: str, frequency_hz: float, func: Callable, *args, **kwargs):
         """Setup periodic function call with specific arguments at a set
         frequency.
 
@@ -116,16 +117,17 @@ class ZMQStreamServer:
         # these containers.
 
         # Add/update func params and call frequency.
-        self.func_params[func] = (args, tuple(sorted(kwargs.items()))) # Dicts aren't hashable.
-        self.call_frequencies[func] = frequency_hz
+        # FIXME: dict storage strategy is kruft?
+        self.func_signature[name] = (func, args, tuple(sorted(kwargs.items()))) # Dicts aren't hashable.
+        self.call_frequencies[name] = frequency_hz
         # Store call by frequency.
         call_names = self.calls_by_frequency.get(frequency_hz, set())
         if not call_names:  # Add to dict if nothing broadcasts at this freq.
             self.calls_by_frequency[frequency_hz] = call_names
-            call_names.add(func)
+            call_names.add(name)
         else:
             with self.calls_lock:  # TODO: do this by frequency?
-                call_names.add(func)
+                call_names.add(name)
         if frequency_hz in self.threads: # Thread already exists.
             return
         # Create a new thread for calls made at this frequency.
@@ -135,17 +137,17 @@ class ZMQStreamServer:
         broadcast_thread.start()
         self.threads[frequency_hz] = broadcast_thread
 
-    def remove(self, func: Callable):
+    def remove(self, name: str):
         """Remove a broadcasting function call that was previously added."""
-        if func not in self.func_params:
+        if name not in self.func_signature:
             raise ValueError(f"Cannot remove {str(func)}. "
                              "Call is not being broadcasted.")
         # Delete all references!
-        call_frequency = self.call_frequencies[func]
+        call_frequency = self.call_frequencies[name]
         with self.calls_lock:  # TODO: do this by frequency?
-            self.calls_by_frequency[call_frequency].remove(func)
-            del self.func_params[func]
-            del self.call_frequencies[func]
+            self.calls_by_frequency[call_frequency].remove(name)
+            del self.func_signature[name]
+            del self.call_frequencies[name]
        # Broadcast thread for this frequency will exit if it has nothing to do.
 
     def _broadcast_worker(self, frequency_hz: float):
@@ -156,20 +158,21 @@ class ZMQStreamServer:
             with self.calls_lock:
                 if not self.calls_by_frequency[frequency_hz]: # Nothing to do!
                     return
-                for func in self.calls_by_frequency[frequency_hz]:
+                for func_name in self.calls_by_frequency[frequency_hz]:
                     # Invoke the function and dispatch the result.
-                    params = self.func_params[func]
-                    args = params[0]
-                    kwargs = dict(params[1])
+                    params = self.func_signature[func_name]
+                    func = params[0]
+                    args = params[1]
+                    kwargs = dict(params[2])
                     try:
-                        reply = func(*args, **kwargs)
+                        # Send result as a tuple.
+                        reply = (func_name.encode("utf-8"),
+                                 pickle.dumps((now(), func(*args, **kwargs))))
                     except Exception as e:
                         self.log.error(f"Function: {func}({args}, {kwargs}) raised "
                                        f"an exception while executing.")
                         reply = str(e)
-                    # Warning: if using TCP, and no subscribers are present,
-                    #   msgs will queue up on the pubisher side.
-                    self.socket.send(pickle.dumps(reply))
+                    self.socket.send_multipart(reply)
             sleep(1.0/frequency_hz)
 
     def close(self):

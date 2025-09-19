@@ -1,11 +1,12 @@
 """Instrument client for controlling/monitoring a remote instrument. Basis for GUIs."""
 
-import zmq
+import logging
 import pickle
-
-# Notes:
-# A UI using the Router needs to know what objects or methods are available
-# on the other side of the client.
+import zmq
+from queue import SimpleQueue
+from threading import Thread, Event
+from time import perf_counter as now
+from typing import Literal, Tuple
 
 
 class RouterClient:
@@ -50,22 +51,48 @@ class ZMQRPCClient:
 
 class ZMQStreamClient:
     """Connect to an instrument server (likely running on an actual instrument)
-    and interact with it via remote control. (A remote procedure call interface)"""
+    and receive periodically broadcasted function call results."""
 
-    # TODO: Create a Thread to recv from the socket and cache the data!
-
-    def __init__(self, ip_address: str = "localhost", port: str = "5556"):
+    def __init__(self, ip_address: str = "localhost", port: str = "5556",
+                 stream_cfg: dict = None):
+        """
+        :param stream_cfg: if specified, configure streams specified in the
+            provided config.
+        """
         # Receive periodic broadcasted messages setup.
+        self.log = logging.getLogger(self.__class__.__name__)
         self.context = zmq.Context()
-        self.socket = self.context.socket(zmq.SUB)
         self.full_address = f"tcp://{ip_address}:{port}"
-        self.socket.connect(self.full_address)
-        self.socket.subscribe("")  # Subscribe to all topics.
+        self.sub_sockets = {}
+        if stream_cfg:
+            for stream_name, storage_type in stream_cfg.items():
+                self.configure_stream(stream_name, storage_type)
 
-    def receive(self):
-        # Publish message
-        return pickle.loads(self.socket.recv())
+    def configure_stream(self, name: str,
+                         storage_type: Literal["queue", "cache"] = "queue"):
+        """Create a subscriber socket to receive a specific topic and setup
+        how to buffer data.
+        * queue -> FIFO.
+        * cache -> only the latest data is received.
+        """
+        # Create zmq socket and configure to either queue or get-the-latest data.
+        socket = self.context.socket(zmq.SUB)
+        socket.connect(self.full_address)
+        socket.subscribe(name)
+        if storage_type == "cache":
+            socket.setsockopt(zmq.CONFLATE, 1)  # last msg only.
+        self.sub_sockets[name] = socket
+
+    def get(self, stream_name: str) -> Tuple[float, any]:
+        """Return the timestamped data."""
+        topic_bytes, packet_bytes = self.sub_sockets[stream_name].recv_multipart(flags=zmq.NOBLOCK)
+        return pickle.loads(packet_bytes)
+
 
     def close(self):
-        self.socket.close()
+        if self.receive_worker and self.receive_worker.is_alive():
+            self.keep_receiving.clear()
+            self.receive_worker.join()
+        for name, socket in self.sub_sockets.items():
+            socket.close()
 

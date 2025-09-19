@@ -30,8 +30,8 @@ def test_server_broadcast():
     sensors = SensorArray()  # Create an object
     server = ZMQStreamServer()  # Create a server.
     # broadcast a method at 100[Hz].
-    server.add(100, sensors.get_data, 0)
-    server.add(100, sensors.get_data, 1)
+    server.add("sensor_0", 100, sensors.get_data, 0)
+    server.add("sensor_1", 100, sensors.get_data, 1)
     sleep(0.05)
     server.close()
 
@@ -41,16 +41,19 @@ def test_client_receive():
     sensors = SensorArray()  # Create an object
     server = ZMQStreamServer()  # Create a server.
     client = ZMQStreamClient()  # Create a client.
+    client.run()
     # broadcast a method at 10[Hz].
-    server.add(10, sensors.get_data, sensor_index)
-    # receive data.
-    received_data = None
+    server.add(f"sensor_{sensor_index}", 10, sensors.get_data, sensor_index)
+    sleep(0.05)
     start_time = now()
-    while ((now() - start_time) < 1):
-        received_data = client.receive()
-        print(f"received: {received_data}")
-        assert 0.0 <= received_data[sensor_index] <= 5.0
-    server.close()
+    try:
+        while ((now() - start_time) < 1):
+            received_data = client.get(f"sensor_{sensor_index}")
+            #print(f"received: {received_data}")
+            assert 0.0 <= received_data[1][sensor_index] <= 5.0
+    finally:
+        client.close()
+        server.close()
 
 
 def test_live_add_remove_broadcast():
@@ -59,14 +62,13 @@ def test_live_add_remove_broadcast():
     sensors = SensorArray()  # Create an object
     server = ZMQStreamServer()  # Create a server.
     client = ZMQStreamClient()  # Create a client.
+    client.run()
     # broadcast a method at 10[Hz].
-    server.add(10, sensors.get_data, sensor_index)
-    server.remove(sensors.get_data)
+    server.add(f"sensor_{sensor_index}", 10, sensors.get_data, sensor_index)
+    server.remove(f"sensor_{sensor_index}")
     # FIXME: thread should exit after removing the only periodic function.
     try:
-        assert server.func_params == {}
-        #assert server.calls_by_frequency == {}
-        #assert server.threads.get(10, None) == None  # might need a delay.
+        assert server.func_signature == {}
     finally:
-        server.close()
         client.close()
+        server.close()
