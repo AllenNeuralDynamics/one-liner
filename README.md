@@ -1,6 +1,9 @@
 # one-liner
 [![License](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
 
+<img src="./assets/train-conductor-mouse.png" width="180">
+
+
 A ZMQ-based Router pattern for interacting with remote python objects.
 
 The router pattern provides a bridge between decoupled applications from interfaces (i.e: the model from the view).
