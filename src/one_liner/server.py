@@ -22,12 +22,14 @@ class RouterServer:
        instances."""
     def __init__(self, rpc_port: str = "5555", broadcast_port: str = "5556",
                  **devices):
-        self.rpc = ZMQRPCServer(port=rpc_port, **devices)
         self.streamer = ZMQStreamServer(port=broadcast_port)
+        # Pass along streamer so we can configure it remotely.
+        self.rpc = ZMQRPCServer(port=rpc_port, __streamer=self.streamer,
+                                **devices)
 
     def run(self):
         """Setup rpc listener and broadcaster."""
-        pass
+        self.rpc.run()
 
     def add_broadcast(self, frequency_hz: float, func: Callable, *args, **kwargs):
         self.streamer.add(frequency_hz, func, *args, **kwargs)
@@ -82,7 +84,7 @@ class ZMQRPCServer:
             request = pickle.loads(pickled_request)
             device_name, method_name, args, kwargs = request
             reply = self._call(device_name, method_name, *args, **kwargs)
-            return self.socket.send(pickle.dumps(reply))
+            self.socket.send(pickle.dumps(reply))
 
 
 class ZMQStreamServer:
@@ -96,7 +98,8 @@ class ZMQStreamServer:
         self.socket = self.context.socket(zmq.PUB)
         self.socket.bind(f"tcp://*:{self.port}")
 
-        self.func_signature: Dict[str, Tuple] = {}
+        self.call_signature: Dict[str, Tuple] = {}
+        self.call_enabled: Dict[str, bool] = {}
         self.calls_by_frequency: Dict[float, set] = {}
         self.call_frequencies: Dict[Callable, float] = {}
         self.calls_lock = Lock()
@@ -118,8 +121,9 @@ class ZMQStreamServer:
 
         # Add/update func params and call frequency.
         # FIXME: dict storage strategy is kruft?
-        self.func_signature[name] = (func, args, tuple(sorted(kwargs.items()))) # Dicts aren't hashable.
+        self.call_signature[name] = (func, args, tuple(sorted(kwargs.items()))) # Dicts aren't hashable.
         self.call_frequencies[name] = frequency_hz
+        self.enable(name)
         # Store call by frequency.
         call_names = self.calls_by_frequency.get(frequency_hz, set())
         if not call_names:  # Add to dict if nothing broadcasts at this freq.
@@ -131,7 +135,7 @@ class ZMQStreamServer:
         if frequency_hz in self.threads: # Thread already exists.
             return
         # Create a new thread for calls made at this frequency.
-        broadcast_thread = Thread(target=self._broadcast_worker,
+        broadcast_thread = Thread(target=self._stream_worker,
                                   name=f"{frequency_hz:.3f}[Hz]_broadcast_thread",
                                   args=[frequency_hz], daemon=True)
         broadcast_thread.start()
@@ -139,18 +143,19 @@ class ZMQStreamServer:
 
     def remove(self, name: str):
         """Remove a broadcasting function call that was previously added."""
-        if name not in self.func_signature:
+        if name not in self.call_signature:
             raise ValueError(f"Cannot remove {str(func)}. "
                              "Call is not being broadcasted.")
         # Delete all references!
         call_frequency = self.call_frequencies[name]
         with self.calls_lock:  # TODO: do this by frequency?
             self.calls_by_frequency[call_frequency].remove(name)
-            del self.func_signature[name]
+            del self.call_signature[name]
             del self.call_frequencies[name]
+            del self.call_enabled[name]
        # Broadcast thread for this frequency will exit if it has nothing to do.
 
-    def _broadcast_worker(self, frequency_hz: float):
+    def _stream_worker(self, frequency_hz: float):
         """Periodically broadcast all functions at the specified frequency.
         If there's nothing to do, exit."""
         while self.keep_broadcasting.is_set():
@@ -159,8 +164,10 @@ class ZMQStreamServer:
                 if not self.calls_by_frequency[frequency_hz]: # Nothing to do!
                     return
                 for func_name in self.calls_by_frequency[frequency_hz]:
+                    if func_name not in self.call_enabled:
+                        continue
                     # Invoke the function and dispatch the result.
-                    params = self.func_signature[func_name]
+                    params = self.call_signature[func_name]
                     func = params[0]
                     args = params[1]
                     kwargs = dict(params[2])
@@ -174,6 +181,14 @@ class ZMQStreamServer:
                         reply = str(e)
                     self.socket.send_multipart(reply)
             sleep(1.0/frequency_hz)
+
+    def enable(self, stream_name: str):
+        if stream_name not in self.call_signature:
+            raise KeyError(f"Stream: {stream_name} is not configured.")
+        self.call_enabled[stream_name] = True
+
+    def disable(self, stream_name: str):
+        del self.call_enabled[stream_name]
 
     def close(self):
         self.keep_broadcasting.clear()

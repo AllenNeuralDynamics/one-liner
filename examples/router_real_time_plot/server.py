@@ -1,4 +1,4 @@
-from one_liner.server import ZMQStreamServer
+from one_liner.server import RouterServer
 
 from time import perf_counter, sleep
 from math import sin, pi
@@ -16,9 +16,11 @@ def sine_t(frequency_hz, phase_shift: float = 0):
 
 if __name__ == "__main__":
     start_time = perf_counter()
-    server = ZMQStreamServer()
+    server = RouterServer()
     for i in range(NUM_STREAMS): # Create a few streams
-        server.add(f"1hz_sine[{i}]", SAMPLE_RATE_HZ, sine_t, 1, i*2*pi/NUM_STREAMS) # set sample and signal rates
+        print(f"Adding broadcast: 1hz_side[{i}] at {SAMPLE_RATE_HZ} Hz")
+        server.add_broadcast(f"1hz_sine[{i}]", SAMPLE_RATE_HZ, sine_t, 1, i*2*pi/NUM_STREAMS) # set sample and signal rates
+    server.run()  # Start rpc thread.
     try:
         while True:
             sleep(0.1)

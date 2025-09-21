@@ -21,9 +21,21 @@ class RouterClient:
         """Call a function/method and return the response."""
         return self.rpc_client.call(name, *args, **kwds)
 
-    def receive_broadcast(self):
+    def configure_stream(self, name: str,
+                         storage_type: Literal["queue", "cache"] = "queue"):
+        self.stream_client.configure_stream(name, storage_type)
+
+    def enable_stream(self, stream_name):
+        # Use rpc_client to enable/disable streams.
+        self.rpc_client.call("__streamer", "enable", stream_name)
+
+    def disable_stream(self, stream_name):
+        # Use rpc_client to enable/disable streams.
+        self.rpc_client.call("__streamer", "disable", stream_name)
+
+    def get_stream(self, stream_name: str) -> Tuple[float, any]:
         """Receive the results of periodically called functions"""
-        return self.stream_client.receive()
+        return self.stream_client.get(stream_name)
 
     def close(self):
         self.stream_client.close()
