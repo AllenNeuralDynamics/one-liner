@@ -11,7 +11,7 @@ from time import sleep
 # Adapted from:
 # https://kkroening.github.io/ffmpeg-python/
 
-VIDEO_SOURCE = "/dev/video4"
+VIDEO_SOURCE = "/dev/video0"
 
 WIDTH = 640
 HEIGHT = 480
@@ -43,7 +43,8 @@ if __name__ == "__main__":
 
 
     server = RouterServer()
-    server.add_broadcast(VIDEO_FEED_NAME, FPS, get_frame)
+    # We need to call this faster than FPS, or it will clog up.
+    server.add_broadcast(VIDEO_FEED_NAME, FPS*2, get_frame)
     server.run()  # Start rpc thread.
 
     try:
