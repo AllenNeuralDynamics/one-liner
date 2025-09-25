@@ -11,7 +11,7 @@ from time import sleep
 # Adapted from:
 # https://kkroening.github.io/ffmpeg-python/
 
-VIDEO_SOURCE = "/dev/video0"
+VIDEO_SOURCE = "/dev/video4"
 
 WIDTH = 640
 HEIGHT = 480
@@ -30,7 +30,7 @@ if __name__ == "__main__":
     stream_process = (
         ffmpeg
         .input(VIDEO_SOURCE, f=input_lib, s=f"{WIDTH}x{HEIGHT}", framerate=FPS)
-        .output('pipe:', format='rawvideo', pix_fmt='rgb24')
+        .output('pipe:', format='rawvideo', pix_fmt='bgr24')
         .run_async(pipe_stdout=True)
     )
 

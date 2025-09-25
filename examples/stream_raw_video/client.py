@@ -6,6 +6,10 @@ from time import perf_counter as now
 from server import VIDEO_FEED_NAME
 
 
+# TODO: receive data in h264 encoding. Then pipe to FFMPEG process to decode into
+# a raw frame that we can view.
+
+
 if __name__ == "__main__":
 
     client = RouterClient()
