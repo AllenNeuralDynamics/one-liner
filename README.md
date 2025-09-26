@@ -4,7 +4,7 @@
 <img src="./assets/train-conductor-mouse.png" width="160">
 
 
-A ZMQ-based Router pattern for interacting with remote python objects.
+a ZMQ-based Router pattern for interacting with remote python objects.
 
 High level features:
 * Remote execution of Python code
@@ -16,12 +16,14 @@ High level features:
   * Multiple `RouterClient`s can connect to a single `RouterServer`
 
 ## Why build this?
-The router pattern provides a bridge between decoupled applications from interfaces (i.e: the model from the view).
+The router pattern provides a bridge between distinct applications.
+
+For our use cases we mostly apply this pattern to separate instrument control code from its respective GUI.
 
 This separation provides several advantages:
 * GUIs can be developed independently of standalone projects.
 * GUIs can run on separate processes or on different machines altogether, providing more flexibility where some machines are resource-constrained.
-* Failures are siloed. A GUI can crash independent of the application it is interfacing with.
+* Failures are siloed. A GUI can crash independent of the application code it is interfacing with.
 
 ## Package Installation with uv
 
