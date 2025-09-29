@@ -160,16 +160,17 @@ class ZMQStreamServer:
                     # Invoke the function and dispatch the result.
                     func, args, kwargs = self.call_signature[func_name]
                     try:
-                        # Send result as tuple. Prefix w/ stream name for zmq topic sorting.
-                        reply = (func_name.encode("utf-8"),
-                                 pickle.dumps((now(), func(*args, **kwargs))))
+                        # Send topic name and result as packed binary data in
+                        # *one* message so Subscriber topic filtering works.
+                        reply = (func_name.encode("utf-8") +
+                                pickle.dumps((now(), func(*args, **kwargs))))
                     except Exception as e:
                         self.log.error(f"Function: {func}({args}, {kwargs}) raised "
                                        f"an exception while executing.")
                         # FIXME: this is a brittle way to send an exception.
-                        reply = (func_name.encode("utf-8"),
-                                 (pickle.dumps((now(), str(e)))))
-                    self.socket.send_multipart(reply)
+                        reply = (func_name.encode("utf-8") +
+                                 pickle.dumps((now(), str(e))))
+                    self.socket.send(reply)
             sleep(1.0/frequency_hz)
 
     def enable(self, stream_name: str):

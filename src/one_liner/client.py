@@ -93,18 +93,19 @@ class ZMQStreamClient:
         """
         # Create zmq socket and configure to either queue or get-the-latest data.
         socket = self.context.socket(zmq.SUB)
-        socket.connect(self.full_address)
         socket.subscribe(name)
         if storage_type == "cache":
-            socket.setsockopt(zmq.CONFLATE, 1)  # last msg only.
+            socket.setsockopt(zmq.CONFLATE, 1)  # last msg only
         else:
             socket.setsockopt(zmq.RCVHWM, 1000) # Buffer up to 1000 msgs.
+        socket.connect(self.full_address)
         self.sub_sockets[name] = socket
 
     def get(self, stream_name: str) -> Tuple[float, any]:
         """Return the timestamped data."""
-        topic_bytes, packet_bytes = self.sub_sockets[stream_name].recv_multipart(flags=zmq.NOBLOCK)
-        return pickle.loads(packet_bytes)
+        pickled_data = self.sub_sockets[stream_name].recv(flags=zmq.NOBLOCK)
+        offset = len(stream_name)
+        return pickle.loads(pickled_data[offset:])  # Strip off topic prefix.
 
     def close(self):
         for name, socket in self.sub_sockets.items():
