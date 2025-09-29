@@ -22,7 +22,7 @@ class SensorArray:
         return {sensor_index: uniform(0., 5.)}
 
 
-def test_many_client_receive():
+def test_caching_option():
     sensor_index = 0
     sensors = SensorArray()  # Create an object
     server = RouterServer()  # Create a server.
