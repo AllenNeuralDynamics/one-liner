@@ -66,7 +66,19 @@ TODO: cache vs queue
 ### Controlling Data Streams
 TODO
 
-## Tools
+## Implementation Details
+
+### Streamer
+Streaming is done by aggregating all calls of the same frequency and creating one thread per frequency.
+Streaming using threads simplifies the problem of scheduling when certain functions would be call using strategies like a priority queue.
+Because sockets are explicitly _not_ threadsafe, each streamer thread instead creates its own PUB socket.
+To simplify connections on the client side, streams are aggregated together through a single socket such that the client only needs to know one address.
+Socket-to-socket communication is done using zmq's shared memory implementation (`inproc`).
+Creating this proxy makes the system threadsafe.
+
+<div align="center">
+<img src="./assets/streamer_architecture.png" width="240px">
+</div>
 
 ### Package/Project Management
 
