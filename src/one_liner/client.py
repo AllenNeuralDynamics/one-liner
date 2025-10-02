@@ -101,9 +101,13 @@ class ZMQStreamClient:
         socket.connect(self.full_address)
         self.sub_sockets[name] = socket
 
-    def get(self, stream_name: str) -> Tuple[float, any]:
-        """Return the timestamped data."""
-        pickled_data = self.sub_sockets[stream_name].recv(flags=zmq.NOBLOCK)
+    def get(self, stream_name: str, block: bool = False) -> Tuple[float, any]:
+        """Return the timestamped data.
+
+        :raises zmq.Again: if block is False (default) and no data is present.
+        """
+        flags = 0 if block else zmq.NOBLOCK
+        pickled_data = self.sub_sockets[stream_name].recv(flags=flags)
         offset = len(stream_name)
         return pickle.loads(pickled_data[offset:])  # Strip off topic prefix.
 
