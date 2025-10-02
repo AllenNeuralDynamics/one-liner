@@ -19,7 +19,8 @@ if __name__ == "__main__":
     server = RouterServer()
     for i in range(NUM_STREAMS): # Create a few streams
         print(f"Adding broadcast: 1hz_side[{i}] at {SAMPLE_RATE_HZ} Hz")
-        server.add_broadcast(f"1hz_sine[{i}]", SAMPLE_RATE_HZ, sine_t, 1, i*2*pi/NUM_STREAMS) # set sample and signal rates
+        # Set sample and signal rates.
+        server.add_broadcast(f"1hz_sine[{i}]", SAMPLE_RATE_HZ, sine_t, 1, i*2*pi/NUM_STREAMS)
     server.run()  # Start rpc thread.
     try:
         while True:

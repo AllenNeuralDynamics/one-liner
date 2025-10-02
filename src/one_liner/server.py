@@ -23,6 +23,7 @@ class RouterServer:
     def run(self):
         """Setup rpc listener and broadcaster."""
         self.rpc.run()
+        self.streamer.run(run_in_thread=True)
 
     def add_broadcast(self, name: str, frequency_hz: float, func: Callable, *args, **kwargs):
         self.streamer.add(name, frequency_hz, func, *args, **kwargs)
@@ -91,9 +92,21 @@ class ZMQStreamServer:
         self.log = logging.getLogger(self.__class__.__name__)
         self.port = port
         self.context = zmq.Context()
-        self.socket = self.context.socket(zmq.PUB)
-        self.socket.bind(f"tcp://*:{self.port}")
+        #self.socket = self.context.socket(zmq.PUB)
+        #self.socket.bind(f"tcp://*:{self.port}")
 
+        # To publish from multiple threads (one per publish frequency) in a
+        # thread-safe way, we need a proxy setup via internal process
+        # communication. Each thread will have a publisher that will publish
+        # To the proxy, making this setup thread-safe!
+        self.worker_url = "inproc://workers"
+        self.xsub_socket = self.context.socket(zmq.XSUB)
+        self.xsub_socket.bind(self.worker_url)
+        self.xpub_socket = self.context.socket(zmq.XPUB)
+        self.xpub_socket.bind(f"tcp://*:{self.port}")
+
+
+        # Data structures.
         self.call_signature: dict[str, tuple] = {}
         self.call_enabled: dict[str, bool] = {}
         self.calls_by_frequency: dict[float, set] = {}
@@ -102,6 +115,18 @@ class ZMQStreamServer:
         self.threads: dict[float, Thread] = {}
         self.keep_broadcasting = Event()
         self.keep_broadcasting.set()
+
+    def run(self, run_in_thread: bool = True):
+        """Launch proxy to handle multiple threads publishing."""
+
+        if not run_in_thread:
+            zmq.proxy(self.xpub_socket, self.xsub_socket)  # Does not return.
+        else:  # If we need to return
+            self.stream_thread = Thread(target = zmq.proxy,
+                                        args = [self.xpub_socket,
+                                                self.xsub_socket],
+                                        daemon=True)
+            self.stream_thread.start()
 
     def add(self, name: str, frequency_hz: float, func: Callable, *args, **kwargs):
         """Setup periodic function call with specific arguments at a set
@@ -146,32 +171,37 @@ class ZMQStreamServer:
             del self.call_enabled[name]
        # Broadcast thread for this frequency will exit if it has nothing to do.
 
-    def _stream_worker(self, frequency_hz: float):
+    def _stream_worker(self, frequency_hz: float, ):
         """Periodically broadcast all functions at the specified frequency.
         If there's nothing to do, exit."""
-        while self.keep_broadcasting.is_set():
-            # Prevent size change in self.broadcast_calls during iteration.
-            with self.calls_lock:
-                if not self.calls_by_frequency[frequency_hz]: # Nothing to do!
-                    return
-                for func_name in self.calls_by_frequency[frequency_hz]:
-                    if func_name not in self.call_enabled:
-                        continue
-                    # Invoke the function and dispatch the result.
-                    func, args, kwargs = self.call_signature[func_name]
-                    try:
-                        # Send topic name and result as packed binary data in
-                        # *one* message so Subscriber topic filtering works.
-                        reply = (func_name.encode("utf-8") +
-                                pickle.dumps((now(), func(*args, **kwargs))))
-                    except Exception as e:
-                        self.log.error(f"Function: {func}({args}, {kwargs}) raised "
-                                       f"an exception while executing.")
-                        # FIXME: this is a brittle way to send an exception.
-                        reply = (func_name.encode("utf-8") +
-                                 pickle.dumps((now(), str(e))))
-                    self.socket.send(reply)
-            sleep(1.0/frequency_hz)
+        socket = self.context.socket(zmq.PUB)
+        socket.connect(self.worker_url)
+        try:
+            while self.keep_broadcasting.is_set():
+                # Prevent size change in self.broadcast_calls during iteration.
+                with self.calls_lock:
+                    if not self.calls_by_frequency[frequency_hz]: # Nothing to do!
+                        return
+                    for func_name in self.calls_by_frequency[frequency_hz]:
+                        if func_name not in self.call_enabled:
+                            continue
+                        # Invoke the function and dispatch the result.
+                        func, args, kwargs = self.call_signature[func_name]
+                        try:
+                            # Send topic name and result as packed binary data in
+                            # *one* message so Subscriber topic filtering works.
+                            reply = (func_name.encode("utf-8") +
+                                    pickle.dumps((now(), func(*args, **kwargs))))
+                        except Exception as e:
+                            self.log.error(f"Function: {func}({args}, {kwargs}) raised "
+                                           f"an exception while executing.")
+                            # FIXME: this is a brittle way to send an exception.
+                            reply = (func_name.encode("utf-8") +
+                                     pickle.dumps((now(), str(e))))
+                        socket.send(reply)
+                sleep(1.0/frequency_hz)
+        finally:
+            socket.close()
 
     def enable(self, stream_name: str):
         """Enable a previously-configured stream by name."""
