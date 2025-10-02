@@ -175,6 +175,7 @@ class ZMQStreamServer:
         If there's nothing to do, exit."""
         socket = self.context.socket(zmq.PUB)
         socket.connect(self.worker_url)
+        sleep_interval_s = 1.0/frequency_hz
         try:
             while self.keep_broadcasting.is_set():
                 # Prevent size change in self.calls_by_frequency during iteration.
@@ -198,7 +199,7 @@ class ZMQStreamServer:
                             reply = (func_name.encode("utf-8") +
                                      pickle.dumps((now(), str(e))))
                         socket.send(reply)
-                sleep(1.0/frequency_hz)
+                sleep(sleep_interval_s)
         finally:
             if not self.calls_by_frequency[frequency_hz]:
                 self.locks_by_frequency[frequency_hz]
