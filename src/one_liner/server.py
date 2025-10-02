@@ -92,13 +92,11 @@ class ZMQStreamServer:
         self.log = logging.getLogger(self.__class__.__name__)
         self.port = port
         self.context = zmq.Context()
-        #self.socket = self.context.socket(zmq.PUB)
-        #self.socket.bind(f"tcp://*:{self.port}")
 
         # To publish from multiple threads (one per publish frequency) in a
-        # thread-safe way, we need a proxy setup via internal process
-        # communication. Each thread will have a publisher that will publish
-        # To the proxy, making this setup thread-safe!
+        # thread-safe way, we need to send published data through a zmq proxy
+        # via internal process communication. Each thread has a zmq publisher
+        # socket will publish through the proxy, making the result thread-safe!
         self.worker_url = "inproc://workers"
         self.xsub_socket = self.context.socket(zmq.XSUB)
         self.xsub_socket.bind(self.worker_url)
@@ -111,7 +109,7 @@ class ZMQStreamServer:
         self.call_enabled: dict[str, bool] = {}
         self.calls_by_frequency: dict[float, set] = {}
         self.call_frequencies: dict[str, float] = {}
-        self.calls_lock = Lock()
+        self.locks_by_frequency: dict[float, Lock] = {}
         self.threads: dict[float, Thread] = {}
         self.keep_broadcasting = Event()
         self.keep_broadcasting.set()
@@ -135,7 +133,6 @@ class ZMQStreamServer:
         If the function is already being broadcasted, update the broadcast
         parameters.
         """
-
         # Add/update func params and call frequency.
         self.call_signature[name] = (func, args, kwargs)
         self.call_frequencies[name] = frequency_hz
@@ -145,8 +142,9 @@ class ZMQStreamServer:
         if not call_names:  # Add to dict if nothing broadcasts at this freq.
             self.calls_by_frequency[frequency_hz] = call_names
             call_names.add(name)
+            self.locks_by_frequency[frequency_hz] = Lock()  # Create a new lock
         else:
-            with self.calls_lock:  # TODO: do this by frequency?
+            with self.locks_by_frequency[frequency_hz]:
                 call_names.add(name)
         if frequency_hz in self.threads: # Thread already exists.
             return
@@ -164,12 +162,13 @@ class ZMQStreamServer:
                              "Call is not being broadcasted.")
         # Delete all references!
         call_frequency = self.call_frequencies[name]
-        with self.calls_lock:  # TODO: do this by frequency?
+        with self.locks_by_frequency[call_frequency]:
             self.calls_by_frequency[call_frequency].remove(name)
             del self.call_signature[name]
             del self.call_frequencies[name]
             del self.call_enabled[name]
-       # Broadcast thread for this frequency will exit if it has nothing to do.
+        # Broadcast thread for this frequency will exit if it has nothing to do
+        # and delete the lock.
 
     def _stream_worker(self, frequency_hz: float, ):
         """Periodically broadcast all functions at the specified frequency.
@@ -178,10 +177,10 @@ class ZMQStreamServer:
         socket.connect(self.worker_url)
         try:
             while self.keep_broadcasting.is_set():
-                # Prevent size change in self.broadcast_calls during iteration.
-                with self.calls_lock:
-                    if not self.calls_by_frequency[frequency_hz]: # Nothing to do!
-                        return
+                # Prevent size change in self.calls_by_frequency during iteration.
+                with self.locks_by_frequency[frequency_hz]:
+                    if not self.calls_by_frequency[frequency_hz]: # exit.
+                        break
                     for func_name in self.calls_by_frequency[frequency_hz]:
                         if func_name not in self.call_enabled:
                             continue
@@ -201,6 +200,8 @@ class ZMQStreamServer:
                         socket.send(reply)
                 sleep(1.0/frequency_hz)
         finally:
+            if not self.calls_by_frequency[frequency_hz]:
+                self.locks_by_frequency[frequency_hz]
             socket.close()
 
     def enable(self, stream_name: str):
