@@ -14,10 +14,12 @@ class RouterServer:
        instances. Heavy lifting is delegated to two subordinate objects."""
     def __init__(self, rpc_port: str = "5555", broadcast_port: str = "5556",
                  **devices):
-        self.streamer = ZMQStreamServer(port=broadcast_port)
+        self.context = zmq.Context()
+        self.streamer = ZMQStreamServer(port=broadcast_port, context=self.context)
         # Pass streamer into RPC Server as another device so we can interact
         # with it remotely. Hide it with a "__" prefix.
-        self.rpc = ZMQRPCServer(port=rpc_port, __streamer=self.streamer,
+        self.rpc = ZMQRPCServer(port=rpc_port, context=self.context,
+                                __streamer=self.streamer,
                                 **devices)
 
     def run(self):
@@ -32,7 +34,10 @@ class RouterServer:
         self.streamer.remove(func)
 
     def close(self):
+        self.rpc.close()
         self.streamer.close()
+        # TODO: figure out why zmq proxy needs destroy instead of just term here
+        self.context.destroy()
 
 
 class ZMQRPCServer:
@@ -40,11 +45,15 @@ class ZMQRPCServer:
     object instances, and dispatch the serialized result to the connected
     RPC Client."""
 
-    def __init__(self, port: str = "5555", **devices):
+    def __init__(self, port: str = "5555", context: zmq.Context = None,
+                 **devices):
         self.log = logging.getLogger(self.__class__.__name__)
         self.port = port
-        self.context = zmq.Context()
+        self.context = context or zmq.Context()
+        self.context_managed_externally = context is not None
         self.socket = self.context.socket(zmq.REP)
+        self.socket.setsockopt(zmq.RCVTIMEO, 100)  # milliseconds
+        self.socket.setsockopt(zmq.LINGER, 0)
         self.socket.bind(f"tcp://*:{self.port}")
         self._keep_receiving = Event()
         self._keep_receiving.set()
@@ -58,10 +67,6 @@ class ZMQRPCServer:
                                      name=f"REQ_receive_worker",
                                      daemon=True)
         self._receive_thread.start()
-
-    def stop(self):
-        self._keep_receiving.clear()
-        self._receive_thread.join()
 
     def _call(self, device_name: str, method_name: str, *args, **kwargs):
         """Lookup the call, invoke it, and return the result."""
@@ -77,54 +82,66 @@ class ZMQRPCServer:
         Launched in a thread.
         """
         while self._keep_receiving.is_set():
-            pickled_request = self.socket.recv()
+            try:
+                pickled_request = self.socket.recv()
+            except zmq.Again:
+                continue
             request = pickle.loads(pickled_request)
             device_name, method_name, args, kwargs = request
             reply = self._call(device_name, method_name, *args, **kwargs)
             self.socket.send(pickle.dumps(reply))
+
+    def close(self):
+        self._keep_receiving.clear()
+        self._receive_thread.join()
+        self.socket.close()
+        if not self.context_managed_externally:
+            self.context.term()
 
 
 class ZMQStreamServer:
     """Broadcaster for periodically calling a callable with specific args/kwargs
        at a specified frequency."""
 
-    def __init__(self, port: str = "5556"):
+    def __init__(self, port: str = "5556", context: zmq.Context = None):
         self.log = logging.getLogger(self.__class__.__name__)
         self.port = port
-        self.context = zmq.Context()
-
+        self.context = context or zmq.Context()
+        self.context_managed_externally = context is not None
         # To publish from multiple threads (one per publish frequency) in a
         # thread-safe way, we need to send published data through a zmq proxy
         # via internal process communication. Each thread has a zmq publisher
         # socket will publish through the proxy, making the result thread-safe!
         self.worker_url = "inproc://workers"
         self.xsub_socket = self.context.socket(zmq.XSUB)
+        self.xsub_socket.setsockopt(zmq.LINGER, 0)
         self.xsub_socket.bind(self.worker_url)
         self.xpub_socket = self.context.socket(zmq.XPUB)
+        self.xpub_socket.setsockopt(zmq.LINGER, 0)
         self.xpub_socket.bind(f"tcp://*:{self.port}")
-
-
-        # Data structures.
         self.call_signature: dict[str, tuple] = {}
         self.call_enabled: dict[str, bool] = {}
         self.calls_by_frequency: dict[float, set] = {}
         self.call_frequencies: dict[str, float] = {}
         self.locks_by_frequency: dict[float, Lock] = {}
         self.threads: dict[float, Thread] = {}
+
         self.keep_broadcasting = Event()
         self.keep_broadcasting.set()
+        self.proxy_thread: Thread = None
+        self.is_running: bool = False
 
     def run(self, run_in_thread: bool = True):
         """Launch proxy to handle multiple threads publishing."""
-
+        if self.is_running:  # extra flag in case we put `run` in a thread elsewhere.
+            raise RuntimeError("Streamer is already running!")
         if not run_in_thread:
+            self.is_running = True
             zmq.proxy(self.xpub_socket, self.xsub_socket)  # Does not return.
         else:  # If we need to return
-            self.stream_thread = Thread(target = zmq.proxy,
-                                        args = [self.xpub_socket,
-                                                self.xsub_socket],
-                                        daemon=True)
-            self.stream_thread.start()
+            self.proxy_thread = Thread(target=self.run, args=[False],
+                                       daemon=True)
+            self.proxy_thread.start()
 
     def add(self, name: str, frequency_hz: float, func: Callable, *args, **kwargs):
         """Setup periodic function call with specific arguments at a set
@@ -140,13 +157,14 @@ class ZMQStreamServer:
         # Store call by frequency.
         call_names = self.calls_by_frequency.get(frequency_hz, set())
         if not call_names:  # Add to dict if nothing broadcasts at this freq.
+            self.log.debug(f"Adding stream: {name} @ {frequency_hz}[Hz].")
             self.calls_by_frequency[frequency_hz] = call_names
             call_names.add(name)
             self.locks_by_frequency[frequency_hz] = Lock()  # Create a new lock
         else:
             with self.locks_by_frequency[frequency_hz]:
                 call_names.add(name)
-        if frequency_hz in self.threads: # Thread already exists.
+        if frequency_hz in self.threads:  # Thread already exists.
             return
         # Create a new thread for calls made at this frequency.
         broadcast_thread = Thread(target=self._stream_worker,
@@ -174,6 +192,7 @@ class ZMQStreamServer:
         """Periodically broadcast all functions at the specified frequency.
         If there's nothing to do, exit."""
         socket = self.context.socket(zmq.PUB)
+        socket.setsockopt(zmq.LINGER, 0)
         socket.connect(self.worker_url)
         sleep_interval_s = 1.0/frequency_hz
         try:
@@ -201,8 +220,8 @@ class ZMQStreamServer:
                         socket.send(reply)
                 sleep(sleep_interval_s)
         finally:
-            if not self.calls_by_frequency[frequency_hz]:
-                self.locks_by_frequency[frequency_hz]
+            if self.calls_by_frequency[frequency_hz]:
+                del self.locks_by_frequency[frequency_hz]
             socket.close()
 
     def enable(self, stream_name: str):
@@ -218,9 +237,7 @@ class ZMQStreamServer:
     def close(self):
         """Exit all threads gracefully."""
         self.keep_broadcasting.clear()
-        try:
-            for thread in self.threads.values():
-                thread.join()
-        finally:
-            self.socket.close()
+        for thread in self.threads.values():
+            thread.join()
+        if not self.context_managed_externally:
             self.context.term()

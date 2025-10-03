@@ -4,7 +4,7 @@ from one_liner.server import RouterServer
 from time import sleep
 
 
-VIDEO_SOURCE = "/dev/video4"
+VIDEO_SOURCE = 0 #"/dev/video4"
 FPS = 30
 VIDEO_FEED_NAME = "live_video"
 

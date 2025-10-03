@@ -21,9 +21,10 @@ if __name__ == "__main__":
         print(f"Adding broadcast: 1hz_side[{i}] at sampled at {SAMPLE_RATE_HZ} Hz")
         # Set sample and signal rates.
         server.add_broadcast(f"1hz_sine[{i}]", SAMPLE_RATE_HZ, sine_t, 1, i*2*pi/NUM_STREAMS)
-    server.run()  # Start rpc thread.
+    server.run()  # Start thread.
     try:
         while True:
-            sleep(0.1)
+            #sleep(0.1)
+            sleep(1.0)
     finally:
         server.close()

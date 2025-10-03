@@ -37,9 +37,9 @@ class RouterClient:
         # Use rpc_client to enable/disable streams.
         self.rpc_client.call("__streamer", "disable", stream_name)
 
-    def get_stream(self, stream_name: str) -> Tuple[float, any]:
+    def get_stream(self, stream_name: str, block: bool = False) -> Tuple[float, any]:
         """Receive the results of a configured stream."""
-        return self.stream_client.get(stream_name)
+        return self.stream_client.get(stream_name, block=block)
 
     def close(self):
         self.stream_client.close()
