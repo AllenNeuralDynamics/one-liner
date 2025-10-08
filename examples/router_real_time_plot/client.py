@@ -1,17 +1,10 @@
-import queue
 import zmq
 import matplotlib
 matplotlib.use('QtAgg')
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-import numpy as np
-
 from one_liner.client import RouterClient
 from collections import deque
-
-from time import perf_counter, sleep
-from math import sin, pi
-
 from server import SAMPLE_INTERVAL_S, NUM_STREAMS
 
 SAMPLES = 500

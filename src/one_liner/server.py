@@ -10,6 +10,8 @@ from typing import Callable
 
 
 class RouterServer:
+    __slots__ = ("context", "streamer", "rpc")
+
     """Interface for enabling remote control/monitoring of one or more object
        instances. Heavy lifting is delegated to two subordinate objects."""
     def __init__(self, rpc_port: str = "5555", broadcast_port: str = "5556",
@@ -29,6 +31,11 @@ class RouterServer:
 
     def add_broadcast(self, name: str, frequency_hz: float, func: Callable, *args, **kwargs):
         self.streamer.add(name, frequency_hz, func, *args, **kwargs)
+
+    def get_broadcast_fn(self, name: str, set_timestamp: bool = False,
+                         encoding: str = "pickle"):
+        return self.streamer.get_broadcast_fn(name, encoding=encoding,
+                                              set_timestamp=set_timestamp)
 
     def remove_broadcast(self, func):
         self.streamer.remove(func)
@@ -125,6 +132,7 @@ class ZMQStreamServer:
         self.call_frequencies: dict[str, float] = {}
         self.locks_by_frequency: dict[float, Lock] = {}
         self.threads: dict[float, Thread] = {}
+        self.manual_broadcast_sockets: dict[str, zmq.Context.socket] = {}
 
         self.keep_broadcasting = Event()
         self.keep_broadcasting.set()
@@ -173,6 +181,42 @@ class ZMQStreamServer:
         broadcast_thread.start()
         self.threads[frequency_hz] = broadcast_thread
 
+    def get_broadcast_fn(self, name: str,  set_timestamp: bool = False,
+                         encoding: str = "pickle"):
+        """Get a function to broadcast the specified stream name.
+        Useful if the application is creating data at its
+        own rate and needs a callback function to call upon producing new data.
+
+        :param name: stream name
+        :param encoding: `pickle` only for now.
+        :param set_timestamp: if true, return a function who's first argument is
+            the timestamp to be set for the packet.
+
+        """
+        if name not in self.manual_broadcast_sockets:
+            self.log.debug(f"Creating socket to manually broadcast stream: {name}.")
+            socket = self.context.socket(zmq.PUB)
+            socket.setsockopt(zmq.LINGER, 0)
+            socket.connect(self.worker_url)
+            self.manual_broadcast_sockets[name] = socket
+        socket = self.manual_broadcast_sockets[name]
+        w_or_wo = "with" if set_timestamp else "without"
+        msg = f"Creating send function for stream {name} {w_or_wo} timestamp."
+        if set_timestamp:
+            self.log.debug(msg)
+            return lambda data, timestamp, s=socket, n=name, e=encoding: \
+                self._send(s, n, data, timestamp=timestamp, encoding=e)
+        return lambda data, s=socket, n=name, e=encoding: \
+            self._send(s, n, data, encoding=e)
+
+    @staticmethod
+    def _send(socket: zmq.Context.socket, name: str, data: any,
+              timestamp: float = None, encoding: str = "pickle"):
+        # TODO: support packing protocols besides pickle
+        timestamp = timestamp if timestamp is not None else now()
+        packet = name.encode("utf-8") + pickle.dumps((timestamp, data))
+        socket.send(packet)
+
     def remove(self, name: str):
         """Remove a broadcasting function call that was previously added."""
         if name not in self.call_signature:
@@ -207,17 +251,14 @@ class ZMQStreamServer:
                         # Invoke the function and dispatch the result.
                         func, args, kwargs = self.call_signature[func_name]
                         try:
-                            # Send topic name and result as packed binary data in
-                            # *one* message so Subscriber topic filtering works.
-                            reply = (func_name.encode("utf-8") +
-                                    pickle.dumps((now(), func(*args, **kwargs))))
+                            result = func(*args, **kwargs)
                         except Exception as e:
-                            self.log.error(f"Function: {func}({args}, {kwargs}) raised "
-                                           f"an exception while executing.")
-                            # FIXME: this is a brittle way to send an exception.
-                            reply = (func_name.encode("utf-8") +
-                                     pickle.dumps((now(), str(e))))
-                        socket.send(reply)
+                            self.log.error(f"Function: {func}({args}, {kwargs}) "
+                                           f"raised an exception while executing.")
+                            result = e
+                        # Send topic name and result as packed binary data in
+                        # *one* message so Subscriber topic filtering works.
+                        self._send(socket, func_name, result, timestamp=now())
                 sleep(sleep_interval_s)
         finally:
             if self.calls_by_frequency[frequency_hz]:
@@ -239,5 +280,7 @@ class ZMQStreamServer:
         self.keep_broadcasting.clear()
         for thread in self.threads.values():
             thread.join()
+        for socket in self.manual_broadcast_sockets.values():
+            socket.close()
         if not self.context_managed_externally:
             self.context.term()
