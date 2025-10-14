@@ -29,19 +29,22 @@ class RouterClient:
         data (`cache`) or to hold onto all data (`queue`)."""
         self.stream_client.configure_stream(name, storage_type)
 
+    def get_stream(self, stream_name: str, block: bool = False) -> Tuple[float, any]:
+        """Receive the results of a configured stream."""
+        return self.stream_client.get(stream_name, block=block)
+
     def enable_stream(self, stream_name):
         """Enable broadcasting of a stream by name."""
         # Use rpc_client to enable/disable streams.
-        self.rpc_client.call("__streamer", "enable", stream_name)
+        return self.rpc_client.call("__streamer", "enable", stream_name)
 
     def disable_stream(self, stream_name):
         """Disable broadcasting of a stream by name."""
         # Use rpc_client to enable/disable streams.
-        self.rpc_client.call("__streamer", "disable", stream_name)
+        return self.rpc_client.call("__streamer", "disable", stream_name)
 
-    def get_stream(self, stream_name: str, block: bool = False) -> Tuple[float, any]:
-        """Receive the results of a configured stream."""
-        return self.stream_client.get(stream_name, block=block)
+    def get_stream_configurations(self):
+        return self.rpc_client.call("__streamer", "get_configuration")
 
     def close(self):
         self.stream_client.close()

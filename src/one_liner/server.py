@@ -4,10 +4,11 @@ import logging
 import pickle
 import zmq
 from one_liner import Protocol, Encoding
+from one_liner.stream_schema import Stream, PeriodicStream, Streams
 from threading import Thread, Event, Lock
 from time import sleep
 from time import perf_counter as now
-from typing import Callable
+from typing import Callable, get_type_hints
 
 
 class RouterServer:
@@ -134,12 +135,14 @@ class ZMQStreamServer:
         pub_address = f"{protocol}://{interface}:{self.port}"
         self.xpub_socket.bind(pub_address)
         self.call_signature: dict[str, tuple] = {}
+        self.call_encodings: dict[str, Encoding] = {}
         self.call_enabled: dict[str, bool] = {}
         self.calls_by_frequency: dict[float, set] = {}
         self.call_frequencies: dict[str, float] = {}
         self.locks_by_frequency: dict[float, Lock] = {}
         self.threads: dict[float, Thread] = {}
         self.manual_broadcast_sockets: dict[str, zmq.Context.socket] = {}
+        self.manual_broadcast_encodings: dict[str, Encoding] = {}
 
         self.keep_broadcasting = Event()
         self.keep_broadcasting.set()
@@ -168,6 +171,7 @@ class ZMQStreamServer:
         # Add/update func params and call frequency.
         self.call_signature[name] = (func, args, kwargs)
         self.call_frequencies[name] = frequency_hz
+        self.call_encodings[name] = "pickle"
         self.enable(name)
         # Store call by frequency.
         call_names = self.calls_by_frequency.get(frequency_hz, set())
@@ -194,6 +198,8 @@ class ZMQStreamServer:
         Useful if the application is creating data at its
         own rate and needs a callback function to call upon producing new data.
 
+        This implicitly adds a manual stream to the configuration.
+
         :param name: stream name
         :param encoding: `pickle` only for now.
         :param set_timestamp: if true, return a function who's first argument is
@@ -207,6 +213,7 @@ class ZMQStreamServer:
             socket.connect(self.worker_url)
             self.manual_broadcast_sockets[name] = socket
         socket = self.manual_broadcast_sockets[name]
+        self.manual_broadcast_encodings[name] = encoding
         w_or_wo = "with" if set_timestamp else "without"
         msg = f"Creating send function for stream {name} {w_or_wo} timestamp."
         if set_timestamp:
@@ -273,7 +280,14 @@ class ZMQStreamServer:
             socket.close()
 
     def enable(self, stream_name: str):
-        """Enable a previously-configured stream by name."""
+        """Enable a previously-configured stream by name.
+
+        .. note::
+           Enabling/disabling streams applies to periodically called streams
+           only and not streams sending data via manually-called broadcast
+           functions.
+
+        """
         if stream_name not in self.call_signature:
             raise KeyError(f"Stream: {stream_name} is not configured.")
         self.call_enabled[stream_name] = True
@@ -281,6 +295,27 @@ class ZMQStreamServer:
     def disable(self, stream_name: str):
         """Disable a previously-configured stream by name."""
         del self.call_enabled[stream_name]
+
+    def _get_return_type(self, stream_name: str) -> str | None:
+        try:
+            return get_type_hints(self.call_signature[stream_name][0])["return"].__name__
+        except KeyError:
+            return None
+
+    def get_configuration(self, to_dict: bool = True) -> Streams | dict:
+        """
+        Get a breakdown of every stream with its broadcast settings.
+        """
+        manual_streams = {n: Stream(encoding=self.manual_broadcast_encodings[n])
+                          for n in self.manual_broadcast_sockets.keys()}
+        periodic_streams = {n: PeriodicStream(encoding=self.call_encodings[n],
+                                              return_type=self._get_return_type(n),
+                                              frequency_hz=self.call_frequencies[n],
+                                              enabled=self.call_enabled[n])
+                            for n in self.call_signature.keys()}
+        streams = Streams(manual_streams=manual_streams,
+                          periodic_streams=periodic_streams)
+        return streams.model_dump() if to_dict else streams
 
     def close(self):
         """Exit all threads gracefully."""
