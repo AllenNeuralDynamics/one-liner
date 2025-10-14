@@ -3,6 +3,7 @@
 import logging
 import pickle
 import zmq
+from one_liner import Protocol, Encoding
 from threading import Thread, Event, Lock
 from time import sleep
 from time import perf_counter as now
@@ -14,15 +15,17 @@ class RouterServer:
 
     """Interface for enabling remote control/monitoring of one or more object
        instances. Heavy lifting is delegated to two subordinate objects."""
-    def __init__(self, rpc_port: str = "5555", broadcast_port: str = "5556",
+    def __init__(self,  protocol: Protocol = "tcp", interface: str = "*",
+                 rpc_port: str = "5555", broadcast_port: str = "5556",
                  **devices):
         self.context = zmq.Context()
-        self.streamer = ZMQStreamServer(port=broadcast_port, context=self.context)
+        self.streamer = ZMQStreamServer(protocol=protocol, interface=interface,
+                                        port=broadcast_port, context=self.context)
         # Pass streamer into RPC Server as another device so we can interact
         # with it remotely. Hide it with a "__" prefix.
-        self.rpc = ZMQRPCServer(port=rpc_port, context=self.context,
-                                __streamer=self.streamer,
-                                **devices)
+        self.rpc = ZMQRPCServer(protocol=protocol, interface=interface,
+                                port=rpc_port, context=self.context,
+                                __streamer=self.streamer, **devices)
 
     def run(self):
         """Setup rpc listener and broadcaster."""
@@ -33,7 +36,7 @@ class RouterServer:
         self.streamer.add(name, frequency_hz, func, *args, **kwargs)
 
     def get_broadcast_fn(self, name: str, set_timestamp: bool = False,
-                         encoding: str = "pickle"):
+                         encoding: Encoding = "pickle"):
         return self.streamer.get_broadcast_fn(name, encoding=encoding,
                                               set_timestamp=set_timestamp)
 
@@ -52,7 +55,8 @@ class ZMQRPCServer:
     object instances, and dispatch the serialized result to the connected
     RPC Client."""
 
-    def __init__(self, port: str = "5555", context: zmq.Context = None,
+    def __init__(self, protocol: Protocol = "tcp", interface: str = "*",
+                 port: str = "5555", context: zmq.Context = None,
                  **devices):
         self.log = logging.getLogger(self.__class__.__name__)
         self.port = port
@@ -61,7 +65,8 @@ class ZMQRPCServer:
         self.socket = self.context.socket(zmq.REP)
         self.socket.setsockopt(zmq.RCVTIMEO, 100)  # milliseconds
         self.socket.setsockopt(zmq.LINGER, 0)
-        self.socket.bind(f"tcp://*:{self.port}")
+        address = f"{protocol}://{interface}:{self.port}"
+        self.socket.bind(address)
         self._keep_receiving = Event()
         self._keep_receiving.set()
         self._receive_thread: Thread = None
@@ -110,7 +115,8 @@ class ZMQStreamServer:
     """Broadcaster for periodically calling a callable with specific args/kwargs
        at a specified frequency."""
 
-    def __init__(self, port: str = "5556", context: zmq.Context = None):
+    def __init__(self, protocol: Protocol = "tcp", interface: str = "*",
+                 port: str = "5556", context: zmq.Context = None):
         self.log = logging.getLogger(self.__class__.__name__)
         self.port = port
         self.context = context or zmq.Context()
@@ -125,7 +131,8 @@ class ZMQStreamServer:
         self.xsub_socket.bind(self.worker_url)
         self.xpub_socket = self.context.socket(zmq.XPUB)
         self.xpub_socket.setsockopt(zmq.LINGER, 0)
-        self.xpub_socket.bind(f"tcp://*:{self.port}")
+        pub_address = f"{protocol}://{interface}:{self.port}"
+        self.xpub_socket.bind(pub_address)
         self.call_signature: dict[str, tuple] = {}
         self.call_enabled: dict[str, bool] = {}
         self.calls_by_frequency: dict[float, set] = {}
@@ -182,7 +189,7 @@ class ZMQStreamServer:
         self.threads[frequency_hz] = broadcast_thread
 
     def get_broadcast_fn(self, name: str,  set_timestamp: bool = False,
-                         encoding: str = "pickle"):
+                         encoding: Encoding = "pickle"):
         """Get a function to broadcast the specified stream name.
         Useful if the application is creating data at its
         own rate and needs a callback function to call upon producing new data.
@@ -211,7 +218,7 @@ class ZMQStreamServer:
 
     @staticmethod
     def _send(socket: zmq.Context.socket, name: str, data: any,
-              timestamp: float = None, encoding: str = "pickle"):
+              timestamp: float = None, encoding: Encoding = "pickle"):
         # TODO: support packing protocols besides pickle
         timestamp = timestamp if timestamp is not None else now()
         packet = name.encode("utf-8") + pickle.dumps((timestamp, data))
