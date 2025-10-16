@@ -54,10 +54,20 @@ pip install -e .[examples]
 ```
 
 ## Quickstart
+
 ### Remote Function Execution
 TODO
 
 ### Streaming Data
+There are three ways to stream data from a `RouterServer` to one or more `RouterClient` objects.
+
+#### Periodic Broadcasting
+TODO
+
+#### Application-Controlled
+TODO
+
+#### from another zmq socket
 TODO
 
 ### Handling Received Data
@@ -80,15 +90,18 @@ Creating this proxy makes the system threadsafe.
 <img src="./assets/streamer_architecture.png" width="240px">
 </div>
 
-### Package/Project Management
+### Relaying data from another ZMQ Socket
+
+TODO
+
+## Package/Project Management
 
 This project utilizes [uv](https://docs.astral.sh/uv/) to handle installing dependencies as well as setting up environments for this project. It replaces tool like pip, poetry, virtualenv, and conda.
 
 This project also uses [tox](https://tox.wiki/en/latest/index.html) for orchestrating multiple testing environments that mimics the github actions CI/CD so that you can test the workflows locally on your machine before pushing changes.
 
 <!--
-
-### Code Quality Check
+## Code Quality Check
 
 The following are tools used to ensure code quality in this project.
 
