@@ -17,9 +17,9 @@ class RouterClient:
                                              port=broadcast_port,
                                              context=self._context)
 
-    def call(self, name, *args, **kwds):
+    def call(self, device_name, method_name, *args, **kwds):
         """Call a function/method and return the response."""
-        return self.rpc_client.call(name, *args, **kwds)
+        return self.rpc_client.call(device_name, method_name, *args, **kwds)
 
     def configure_stream(self, name: str,
                          storage_type: Literal["queue", "cache"] = "queue"):
