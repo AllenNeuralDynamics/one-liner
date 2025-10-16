@@ -78,6 +78,11 @@ TODO
 
 ## Implementation Details
 
+### Bird's Eye View
+<div align="center">
+<img src="./assets/one_liner_socket_architecture.png" width="240px">
+</div>
+
 ### Streamer
 Streaming is done by aggregating all calls of the same frequency and creating one thread per frequency.
 Streaming using threads simplifies the problem of scheduling when certain functions would be call using strategies like a priority queue.
@@ -92,7 +97,12 @@ Creating this proxy makes the system threadsafe.
 
 ### Relaying data from another ZMQ Socket
 
-TODO
+It's also possible to stream data from an existing zmq socket.
+Here's what that implementation looks like with zmq proxies:
+
+<div align="center">
+<img src="./assets/one_liner_relay_stream_architecture.png" width="300px">
+</div>
 
 ## Package/Project Management
 
