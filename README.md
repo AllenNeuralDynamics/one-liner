@@ -101,7 +101,7 @@ Streaming is done by aggregating all calls of the same frequency and creating on
 Streaming using threads simplifies the problem of scheduling when certain functions would be call using strategies like a priority queue.
 Because sockets are explicitly _not_ threadsafe, each streamer thread instead creates its own PUB socket.
 To simplify connections on the client side, streams are aggregated together through a single socket such that the client only needs to know one address.
-Socket-to-socket communication is done using zmq's shared memory implementation (`inproc`).
+Socket-to-socket communication is done using zmq's same-process shared memory implementation (`inproc`).
 Creating this proxy makes the system threadsafe.
 
 <div align="center">
@@ -111,11 +111,13 @@ Creating this proxy makes the system threadsafe.
 ### Relaying data from another ZMQ Socket
 
 It's also possible to stream data from an existing zmq socket.
-Here's what that implementation looks like with zmq proxies:
+This is done with a zmq proxy.
 
 <div align="center">
 <img src="./assets/one_liner_relay_stream_architecture.png" width="300px">
 </div>
+
+By relaying data from a completely separate zmq socket, it is possible to cascade `RouterServer`s.
 
 ## Package/Project Management
 
