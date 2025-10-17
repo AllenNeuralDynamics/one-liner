@@ -79,9 +79,22 @@ TODO
 ## Implementation Details
 
 ### Bird's Eye View
+High level, the `RouterServer` and `RouterClient` support two ways of sending and receiving data remotely.
+
 <div align="center">
 <img src="./assets/one_liner_socket_architecture.png" width="240px">
 </div>
+
+It is also OK to connect multiple `RouterClient`s to a single `RouterServer` like so:
+<div align="center">
+<img src="./assets/many_sub_socket_architecture.png" width="550px">
+</div>
+
+
+> [!WARNING]
+> There are no restrictions for connecting multiple clients at this level.
+> Any restrictions or limitations on what functions can be called when multiple clients are connected needs to be applied at a higher level.
+
 
 ### Streamer
 Streaming is done by aggregating all calls of the same frequency and creating one thread per frequency.
