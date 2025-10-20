@@ -110,7 +110,7 @@ Creating this proxy makes the system threadsafe.
 
 ### Relaying data from another ZMQ Socket
 
-It's also possible to stream data from an existing zmq socket.
+It's also possible to stream data from an existing zmq socket (including another `RouterServer`).
 This is done with a zmq proxy.
 
 <div align="center">
