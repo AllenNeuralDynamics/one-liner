@@ -3,17 +3,17 @@
 
 <img src="./assets/train-conductor-mouse.png" width="160">
 
-
 a ZMQ-based Router pattern for interacting with remote python objects.
 
-High level features:
+## High level features:
 * Remote execution of Python code
 * Streaming of periodically called functions with the ability to enable/disable them
 * caching and queuing options for receiving data from `RouterClient`
 * Multiple topologies for `RouterServer` and `RouterClient` communication
   * between processes on the same PC
   * across multiple PCs.
-  * Multiple `RouterClient`s can connect to a single `RouterServer`
+  * Many `RouterClient`s can connect to a single `RouterServer`
+  * `RouterServer`s can cascade: (i.e: a `RouterServer` can forward to another `RouterServer`)
 
 ## Why build this?
 The router pattern provides a bridge between distinct applications.
@@ -110,7 +110,7 @@ Creating this proxy makes the system threadsafe.
 
 ### Relaying data from another ZMQ Socket
 
-It's also possible to stream data from an existing zmq socket.
+It's also possible to stream data from an existing zmq socket (including another `RouterServer`).
 This is done with a zmq proxy.
 
 <div align="center">
