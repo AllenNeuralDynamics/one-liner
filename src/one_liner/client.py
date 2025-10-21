@@ -99,11 +99,13 @@ class ZMQStreamClient:
         """
         # Create zmq socket and configure to either queue or get-the-latest data.
         socket = self.context.socket(zmq.SUB)
+        self.log.debug(f"Creating socket for {name} stream and subscribing to topic: {name}.")
         socket.subscribe(name)
         if storage_type == "cache":
             socket.setsockopt(zmq.CONFLATE, 1)  # last msg only
         else:
             socket.setsockopt(zmq.RCVHWM, 1000) # Buffer up to 1000 msgs.
+        self.log.debug(f"Connecting socket for {name} to receive stream from: {self.address}.")
         socket.connect(self.address)
         self.sub_sockets[name] = socket
 

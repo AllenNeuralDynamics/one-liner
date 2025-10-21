@@ -16,6 +16,7 @@ class PeriodicStream(Stream):
 
 class Streams(BaseModel):
     manual_streams: Optional[dict[str, Stream]] = Field(default_factory=dict)
+    zmq_streams: Optional[dict[str, Stream]] = Field(default_factory=dict)
     periodic_streams: Optional[dict[str, PeriodicStream]] = Field(default_factory=dict)
 
     # Maybe we do a calls-by-frequency getter fn?
