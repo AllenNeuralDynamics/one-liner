@@ -10,8 +10,9 @@ from one_liner import Protocol
 class RouterClient:
 
     def __init__(self, protocol: Protocol = "tcp", interface: str = "localhost",
-                 rpc_port: str = "5555", broadcast_port: str = "5556"):
-        self._context = zmq.Context()  # Create shared context
+                 rpc_port: str = "5555", broadcast_port: str = "5556",
+                 context: zmq.Context = None):
+        self._context = context or zmq.Context()  # Create shared context
         self.rpc_client = ZMQRPCClient(protocol=protocol, interface=interface,
                                        port=rpc_port, context=self._context)
         self.stream_client = ZMQStreamClient(protocol=protocol,
