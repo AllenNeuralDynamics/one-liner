@@ -121,7 +121,8 @@ class ZMQRPCServer:
             request = pickle.loads(pickled_request)
             device_name, method_name, args, kwargs = request
             reply = self._call(device_name, method_name, *args, **kwargs)
-            self.socket.send(pickle.dumps(reply))
+            # Set copy=False since we have a pickled representation of the data.
+            self.socket.send(pickle.dumps(reply), copy=False)
 
     def close(self):
         self._keep_receiving.clear()
@@ -254,7 +255,8 @@ class ZMQStreamServer:
         # TODO: support packing protocols besides pickle
         timestamp = timestamp if timestamp is not None else now()
         packet = name.encode("utf-8") + pickle.dumps((timestamp, data))
-        socket.send(packet)
+        # Set copy=False since we have a pickled representation of the data.
+        socket.send(packet, copy=False)
 
     def add_zmq_stream(self, name: str, address: str, enabled: bool = True,
                        log_chatter: bool = False):

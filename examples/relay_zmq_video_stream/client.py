@@ -25,7 +25,7 @@ if __name__ == "__main__":
             print(f"Execution time: {curr_time - last_time: .3f} seconds")
             last_time = curr_time
             cv2.imshow(VIDEO_FEED_NAME, frame)
-            cv2.waitKey(1000) # Required short wait (1-ms).
+            cv2.waitKey(1) # Required short wait (1-ms).
     finally:
         cv2.destroyAllWindows()
         client.close()
