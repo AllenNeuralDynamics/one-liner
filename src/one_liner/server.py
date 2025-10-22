@@ -199,21 +199,21 @@ class ZMQStreamServer:
         self.call_encodings[name] = "pickle"
         self.enable(name)
         # Store call by frequency.
-        call_names = self.calls_by_frequency.get(frequency_hz, set())
+        call_names = self.calls_by_frequency.get(frequency_hz, None)
+        self.log.debug(f"Adding stream: {name} @ {frequency_hz}[Hz].")
         if not call_names:  # Add to dict if nothing broadcasts at this freq.
-            self.log.debug(f"Adding stream: {name} @ {frequency_hz}[Hz].")
-            self.calls_by_frequency[frequency_hz] = call_names
-            call_names.add(name)
+            self.calls_by_frequency[frequency_hz] = set()
             self.locks_by_frequency[frequency_hz] = Lock()  # Create a new lock
-        else:
-            with self.locks_by_frequency[frequency_hz]:
-                call_names.add(name)
+        with self.locks_by_frequency[frequency_hz]:
+            call_names.add(name)
         if frequency_hz in self.threads:  # Thread already exists.
             return
         # Create a new thread for calls made at this frequency.
         broadcast_thread = Thread(target=self._stream_worker,
                                   name=f"{frequency_hz:.3f}[Hz]_broadcast_thread",
                                   args=[frequency_hz], daemon=True)
+        self.log.debug(f"Launching new thread '{broadcast_thread.name}' to "
+                       f"broadcast function call results at {frequency_hz}[Hz].")
         broadcast_thread.start()
         self.threads[frequency_hz] = broadcast_thread
 
