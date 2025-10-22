@@ -199,10 +199,10 @@ class ZMQStreamServer:
         self.call_encodings[name] = "pickle"
         self.enable(name)
         # Store call by frequency.
-        call_names = self.calls_by_frequency.get(frequency_hz, None)
+        call_names = self.calls_by_frequency.get(frequency_hz, set())
         self.log.debug(f"Adding stream: {name} @ {frequency_hz}[Hz].")
         if not call_names:  # Add to dict if nothing broadcasts at this freq.
-            self.calls_by_frequency[frequency_hz] = set()
+            self.calls_by_frequency[frequency_hz] = call_names
             self.locks_by_frequency[frequency_hz] = Lock()  # Create a new lock
         with self.locks_by_frequency[frequency_hz]:
             call_names.add(name)
