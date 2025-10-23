@@ -7,6 +7,9 @@ from one_liner.client import RouterClient
 from collections import deque
 from server import SAMPLE_INTERVAL_S, NUM_STREAMS
 
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
 SAMPLES = 500
 PLOT_INTERVAL_MS = 1/60. * 1000
 

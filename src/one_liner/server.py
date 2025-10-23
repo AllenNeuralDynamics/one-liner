@@ -2,13 +2,14 @@
 
 import logging
 import pickle
+import json
 import zmq
 from one_liner import Protocol, Encoding
 from one_liner.stream_schema import Stream, PeriodicStream, Streams
 from threading import Thread, Event, Lock
 from time import sleep
 from time import perf_counter as now
-from typing import Callable, get_type_hints
+from typing import Callable, get_type_hints, Any
 
 
 class RouterServer:
@@ -132,9 +133,24 @@ class ZMQRPCServer:
             self.context.term()
 
 
+SERIALIZERS = \
+    {
+        None: lambda x: x,
+        "pickle": pickle.dumps,
+        "json": json.dumps
+    }
+
 class ZMQStreamServer:
     """Broadcaster for periodically calling a callable with specific args/kwargs
        at a specified frequency."""
+    __slots__ = ("log", "port", "context_managed_externally", "worker_url",
+                 "context", "xsub_socket", "xpub_socket",
+                 "zmq_streams", "zmq_stream_ctrl_sockets",
+                 "call_signature", "call_encodings", "call_enabled",
+                 "calls_by_frequency", "call_frequencies", "locks_by_frequency",
+                 "threads", "manual_broadcast_sockets",
+                 "manual_broadcast_encodings", "keep_broadcasting",
+                 "proxy_thread", "is_running")
 
     def __init__(self, protocol: Protocol = "tcp", interface: str = "*",
                  port: str = "5556", context: zmq.Context = None):
@@ -250,11 +266,24 @@ class ZMQStreamServer:
             self._send(s, n, data, encoding=e)
 
     @staticmethod
-    def _send(socket: zmq.Context.socket, name: str, data: any,
+    def _send(socket: zmq.Context.socket, name: str, data: bytes | Any,
               timestamp: float = None, encoding: Encoding = "pickle"):
-        # TODO: support packing protocols besides pickle
+        """Send the data on tne specified socket prefixed with the specified
+        stream name.
+
+        :param socket: socket to do the sending.
+        :param name: stream name. Under the hood, this is the topic.
+        :param data: data to send. If the data is not `bytes`-like, the
+           :paramref:`ZMQStreamServer._send.encoding` option cannot be None.
+        :param encoding: the encoding option which to encode the data or `None`
+           if the data is `bytes`-like. Default is `"pickle"`.
+
+        """
         timestamp = timestamp if timestamp is not None else now()
-        packet = name.encode("utf-8") + pickle.dumps((timestamp, data))
+        # Because the CONFLATE option (keep-last-message) only, doesn't work
+        # with multipart messages where the first msg is the topic, we smush
+        # the topic and data together before sending.
+        packet = name.encode("utf-8") + SERIALIZERS[encoding]((timestamp, data))
         # Set copy=False since we have a pickled representation of the data.
         socket.send(packet, copy=False)
 
