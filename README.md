@@ -62,7 +62,25 @@ TODO
 There are three ways to stream data from a `RouterServer` to one or more `RouterClient` objects.
 
 #### Periodic Broadcasting
-TODO
+In the PC acting as the server:
+```python
+server = RouterServer()
+```
+
+In the PC acting as the client:
+```python
+import cv2
+
+video = cv2.VideoCapture(0)
+
+def get_frame():
+    return video.read()[1]
+
+client = RouterClient()
+client.configure_stream("live_video")
+```
+
+In the PC running **
 
 #### Application-Controlled
 TODO
