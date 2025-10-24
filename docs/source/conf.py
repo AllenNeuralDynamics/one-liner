@@ -14,7 +14,7 @@ project_root = Path(__file__).resolve().parents[2]
 src_path = project_root / "src"
 sys.path.insert(0, str(src_path))
 
-from mypackage import __version__ as package_version
+from one_liner import __version__ as package_version
 
 INSTITUTE_NAME = "Allen Institute for Neural Dynamics"
 current_year = date.today().year
@@ -51,6 +51,8 @@ html_theme_options = {
 }
 
 # If true, "Created using Sphinx" is shown in the HTML footer. Default is True.
+autoclass_content = 'both'
+toc_object_entries_show_parents = 'hide'
 html_show_sphinx = False
 
 # If true, "(C) Copyright ..." is shown in the HTML footer. Default is True.

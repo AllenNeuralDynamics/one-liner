@@ -8,12 +8,12 @@ a ZMQ-based Router pattern for interacting with remote python objects.
 ## High level features:
 * Remote execution of Python code
 * Streaming of periodically called functions with the ability to enable/disable them
-* caching and queuing options for receiving data from `RouterClient`
-* Multiple topologies for `RouterServer` and `RouterClient` communication
+* caching and queuing options for receiving only relevant data from `RouterClient`
+* Multiple topologies supported between `RouterServer` and `RouterClient` communication including
   * between processes on the same PC
   * across multiple PCs.
-  * Many `RouterClient`s can connect to a single `RouterServer`
-  * `RouterServer`s can cascade: (i.e: a `RouterServer` can forward to another `RouterServer`)
+  * Single `RouterServer`s to many `RouterClient`s.
+  * Cascading `RouterServer`s: (i.e: a `RouterServer` can forward to another `RouterServer`).
 
 ## Why build this?
 The router pattern provides a bridge between distinct applications.
@@ -24,6 +24,10 @@ This separation provides several advantages:
 * GUIs can be developed independently of standalone projects.
 * GUIs can run on separate processes or on different machines altogether, providing more flexibility where some machines are resource-constrained.
 * Failures are siloed. A GUI can crash independent of the application code it is interfacing with.
+
+Implementation-wise, this package acts as a lightweight wrapper around zmq, delegating most of the heavy-lifting to existing zmq solutions while hiding the messy details.
+Interface-wise, this package tries not to commit the user to adopting a specific architecture and supports various ways of attaching existing code so it can be "routed" elsewhere.
+**one_liner** place nicely in multi-threaded and multiprocessing-based Python projects.
 
 ## Package Installation with uv
 
@@ -36,6 +40,7 @@ To install all optional dependencies to play with the examples, run:
 ```bash
 uv sync --extra examples
 ```
+
 
 ## Package Installation with Pip
 
@@ -53,6 +58,7 @@ To install with supplementary dependencies for running the examples, run:
 pip install -e .[examples]
 ```
 
+
 ## Quickstart
 
 ### Remote Function Execution
@@ -64,32 +70,68 @@ There are three ways to stream data from a `RouterServer` to one or more `Router
 #### Periodic Broadcasting
 In the PC acting as the server:
 ```python
+from one_liner.server import RouterServer
+import cv2
+
+video = cv2.VideoCapture(0) # Get the first available camera.
+
+def get_frame():
+  return video.read()[1] # skip the timestamp; just get the frame.
+
 server = RouterServer()
+server.add_broadcast("live_video", # name of the stream
+                     30,  # How fast to call this function.
+                     get_frame) # func to call (no *args or **kwargs in this case).
+server.run(run_in_thread=False)  # block, but we can not-block if set to True. That's it!
 ```
 
 In the PC acting as the client:
 ```python
+from one_liner.client import RouterClient
 import cv2
-
-video = cv2.VideoCapture(0)
-
-def get_frame():
-    return video.read()[1]
+import zmq
 
 client = RouterClient()
 client.configure_stream("live_video")
+
+while True:
+    try:
+        timestamp, frame = client.get_stream("live_video")
+    except zmq.Again:
+        continue
+    cv2.imshow("live_video from RouterServer", frame)
+    cv2.waitKey(1) # Required short wait (1-ms).
 ```
 
-In the PC running **
+That's it!
+
 
 #### Application-Controlled
-TODO
+Instead of having `RouterServer` periodically call a function in a thread, it's also possible to have your native application send data.
+
+In the PC acting as the server:
+```python
+from one_liner.server import RouterServer
+import cv2
+
+video = cv2.VideoCapture(0) # Get the first available camera.
+
+server = RouterServer()
+send_frame = server.get_broadcast_fn("live_video")
+server.run()  # don't block.
+
+while True:
+    send_frame(video.read()[1])  # Read and send camera frames as fast as possible.
+```
+
+In the PC acting as the client--there are no changes!
+It's just the same example client code as before.
 
 #### from another zmq socket
-TODO
+**TODO**: see the examples folder for now.
 
 ### Handling Received Data
-TODO: cache vs queue
+**TODO**: cache vs queue.
 
 ### Controlling Data Streams
 TODO
@@ -143,6 +185,29 @@ This project utilizes [uv](https://docs.astral.sh/uv/) to handle installing depe
 
 This project also uses [tox](https://tox.wiki/en/latest/index.html) for orchestrating multiple testing environments that mimics the github actions CI/CD so that you can test the workflows locally on your machine before pushing changes.
 
+## Documentation
+### Environment Setup
+To install with supplementary dependencies for creating local docs, run:
+
+With uv:
+```bash
+uv sync --extra docs
+```
+with pip:
+```bash
+pip install -e .[docs]
+```
+
+### Building the Docs
+To generate the rst files source files for documentation from this directory, run
+```bash
+uv run sphinx-apidoc -o docs/source/ src
+```
+Then, to create the documentation HTML files, run
+```bash
+uv run sphinx-build -b html docs/source/ docs/_build/html
+```
+
 <!--
 ## Code Quality Check
 
@@ -165,13 +230,4 @@ uv run ruff check
 ```bash
 uv run mypy src/mypackage
 ```
-
-## Documentation
-To generate the rst files source files for documentation, run
-```bash
-sphinx-apidoc -o docs/source/ src
-```
-Then to create the documentation HTML files, run
-```bash
-sphinx-build -b html docs/source/ docs/_build/html
-```
+-->

@@ -30,11 +30,11 @@ class RouterServer:
            (or `RouterServer` and `RouterServer` if forwarding).
 
         .. note::
-           For the `protocol` setting, some options are system-dependent (i.e: `ipc`
-           is for unix-like OSes only).
+           For the `protocol` setting, some options are system-dependent (i.e:
+           `ipc` is for unix-like OSes only).
 
         """
-        self.context = context or zmq.Context()
+        self.context = context or zmq.Context.instance()
         self.streamer = ZMQStreamServer(protocol=protocol, interface=interface,
                                         port=broadcast_port, context=self.context)
         # Pass streamer into RPC Server as another device so we can interact
@@ -44,11 +44,16 @@ class RouterServer:
                                 __streamer=self.streamer, **devices)
 
     def run(self, run_in_thread: bool = True):
-        """Setup rpc listener and broadcaster."""
+        """Setup rpc listener and broadcaster.
+
+        :param run_in_thread: if ``True`` (default), run the underlying blocking
+           calls in a thread and return immediately.
+        """
         self.rpc.run()
         self.streamer.run(run_in_thread=run_in_thread)
 
-    def add_broadcast(self, name: str, frequency_hz: float, func: Callable, *args, **kwargs):
+    def add_broadcast(self, name: str, frequency_hz: float, func: Callable,
+                      *args, **kwargs):
         self.streamer.add(name, frequency_hz, func, *args, **kwargs)
 
     def get_broadcast_fn(self, name: str, set_timestamp: bool = False,
