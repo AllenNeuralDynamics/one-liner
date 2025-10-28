@@ -44,7 +44,7 @@ if __name__ == "__main__":
 
     server = RouterServer()
     # We need to call this faster than FPS, or it will clog up.
-    server.add_broadcast(VIDEO_FEED_NAME, FPS*2, get_frame)
+    server.add_stream(VIDEO_FEED_NAME, FPS*2, get_frame)
     server.run()  # Start rpc thread.
 
     try:

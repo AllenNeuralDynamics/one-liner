@@ -1,28 +1,17 @@
-import json
 import logging
-import pickle
 import zmq
-from one_liner import Encoding, Protocol
 from one_liner.stream_schema import Stream, PeriodicStream, Streams
+from one_liner.utils import Encoding, Protocol, _send
 from threading import Event, Lock, Thread
-from time import perf_counter as now
 from time import sleep
-from typing import Callable, get_type_hints, Any
-
-
-SERIALIZERS = \
-    {
-        None: lambda x: x,
-        "pickle": pickle.dumps,
-        "json": json.dumps
-    }
+from typing import Callable, get_type_hints
 
 
 class ZMQStreamServer:
     """Broadcaster for periodically calling a callable with specific args/kwargs
        at a specified frequency."""
-    __slots__ = ("log", "port", "_context_managed_externally", "worker_url",
-                 "context", "_xsub_socket", "_xpub_socket",
+    __slots__ = ("log", "port", "_context_managed_externally", "_worker_url",
+                 "_context", "_xsub_socket", "_xpub_socket",
                  "_zmq_streams", "_zmq_stream_ctrl_sockets",
                  "_call_signature", "_call_encodings", "_call_enabled",
                  "_calls_by_frequency", "_call_frequencies",
@@ -34,7 +23,7 @@ class ZMQStreamServer:
                  port: str = "5556", context: zmq.Context = None):
         self.log = logging.getLogger(self.__class__.__name__)
         self.port: str = port
-        self.context: zmq.Context = context or zmq.Context()
+        self._context: zmq.Context = context or zmq.Context()
         self._context_managed_externally = context is not None
         # zmq sockets are not thread-safe!
         # To publish from multiple threads (one per publish frequency) in a
@@ -42,17 +31,17 @@ class ZMQStreamServer:
         # published data through a zmq proxy via internal same-process
         # communication (zmq's "inproc"). The result is thread-safe by design
         # without needing to use any Python semantics (locks, etc).
-        self.worker_url = f"inproc://workers:{id(self)}"  # unique per instance
-        self._xsub_socket = self.context.socket(zmq.XSUB)
+        self._worker_url = f"inproc://workers:{id(self)}"  # unique per instance
+        self._xsub_socket = self._context.socket(zmq.XSUB)
         self._xsub_socket.setsockopt(zmq.LINGER, 0)
-        self._xsub_socket.bind(self.worker_url)
-        self._xpub_socket = self.context.socket(zmq.XPUB)
+        self._xsub_socket.bind(self._worker_url)
+        self._xpub_socket = self._context.socket(zmq.XPUB)
         self._xpub_socket.setsockopt(zmq.LINGER, 0)
         pub_address = f"{protocol}://{interface}:{self.port}"
         self.log.warning(f"Publishing from: {pub_address}")
         self._xpub_socket.bind(pub_address)
         self.log.debug(f"Creating zmq proxy to forward messages from: "
-                       f"{self.worker_url} to {pub_address}.")
+                       f"{self._worker_url} to {pub_address}.")
         # zmq stream proxy threads and control sockets
         self._zmq_streams = {}
         self._zmq_stream_ctrl_sockets = {}
@@ -75,7 +64,7 @@ class ZMQStreamServer:
     def run(self, run_in_thread: bool = True):
         """Launch proxy to handle multiple threads publishing.
 
-        :param run_in_thread:  if True (default) run the proxy in a separate
+        :param run_in_thread:  if True (default) run the zmq proxy in a separate
            thread to prevent blocking.
 
         """
@@ -90,9 +79,16 @@ class ZMQStreamServer:
             self._proxy_thread.start()
 
     def add(self, name: str, frequency_hz: float, func: Callable, *args, **kwargs):
-        """Setup periodic function call with specific arguments at a set
-        frequency. If the function is already being broadcasted, update the
-        broadcast parameters.
+        """Create a stream. i.e: Setup a function to be called with specific
+        arguments at a set frequency. If the function is already being
+        broadcasted, update the broadcast parameters.
+
+        :param name:
+        :param frequency_hz:
+        :param func:
+        :param \\*args:
+        :param \\*\\*kwargs:
+
         """
         # Add/update func params and call frequency.
         self._call_signature[name] = (func, args, kwargs)
@@ -118,8 +114,8 @@ class ZMQStreamServer:
         broadcast_thread.start()
         self._threads[frequency_hz] = broadcast_thread
 
-    def get_broadcast_fn(self, name: str,  set_timestamp: bool = False,
-                         encoding: Encoding = "pickle"):
+    def get_stream_fn(self, name: str, set_timestamp: bool = False,
+                      encoding: Encoding = "pickle"):
         """Get a function to broadcast the specified stream name.
         Useful if the application is creating data at its
         own rate and needs a callback function to call upon producing new data.
@@ -133,10 +129,10 @@ class ZMQStreamServer:
 
         """
         if name not in self._manual_broadcast_sockets:
-            self.log.debug(f"Creating socket to manually broadcast stream: {name} to {self.worker_url}.")
-            socket = self.context.socket(zmq.PUB)
+            self.log.debug(f"Creating socket to manually broadcast stream: {name} to {self._worker_url}.")
+            socket = self._context.socket(zmq.PUB)
             socket.setsockopt(zmq.LINGER, 0)
-            socket.connect(self.worker_url)
+            socket.connect(self._worker_url)
             self._manual_broadcast_sockets[name] = socket
         socket = self._manual_broadcast_sockets[name]
         self._manual_broadcast_encodings[name] = encoding
@@ -144,32 +140,10 @@ class ZMQStreamServer:
         msg = f"Creating send function for stream {name} with {tstamp_option} timestamp."
         self.log.debug(msg)
         if set_timestamp:
-            return lambda data, timestamp, s=socket, n=name, e=encoding: \
-                self._send(s, n, data, timestamp=timestamp, encoding=e)
-        return lambda data, s=socket, n=name, e=encoding: \
-            self._send(s, n, data, encoding=e)
-
-    @staticmethod
-    def _send(socket: zmq.Context.socket, name: str, data: bytes | Any,
-              timestamp: float = None, encoding: Encoding = "pickle"):
-        """Send the data on tne specified socket prefixed with the specified
-        stream name.
-
-        :param socket: socket to do the sending.
-        :param name: stream name. Under the hood, this is the topic.
-        :param data: data to send. If the data is not `bytes`-like, the
-           :paramref:`ZMQStreamServer._send.encoding` option cannot be None.
-        :param encoding: the encoding option which to encode the data or `None`
-           if the data is `bytes`-like. Default is `"pickle"`.
-
-        """
-        timestamp = timestamp if timestamp is not None else now()
-        # Because the CONFLATE option (keep-last-message) only, doesn't work
-        # with multipart messages where the first msg is the topic, we smush
-        # the topic and data together before sending.
-        packet = name.encode("utf-8") + SERIALIZERS[encoding]((timestamp, data))
-        # Set copy=False since we have a pickled representation of the data.
-        socket.send(packet, copy=False)
+            return lambda data, timestamp, s=socket, n=name, success=True, e=encoding: \
+                _send(s, n, data, timestamp=timestamp, success=success, encoding=e)
+        return lambda data, s=socket, n=name, success=True, e=encoding: \
+            _send(s, n, data, success=success, encoding=e)
 
     def add_zmq_stream(self, name: str, address: str, enabled: bool = True,
                        log_chatter: bool = False):
@@ -177,25 +151,29 @@ class ZMQStreamServer:
 
         :param name: stream name
         :param address: zmq socket address: `{protocol}://{interface}:{port}`
+        :param enabled: if True (default) enable relaying of the upstream
+           zmq topic data.
+        :param log_chatter:
+
         """
-        self.log.debug(f"Creating zmq proxy to forward messages from: {address} to {self.worker_url}")
+        self.log.debug(f"Creating zmq proxy to forward messages from: {address} to {self._worker_url}")
         # Create XSUB and XPUB relay
-        xsub_socket = self.context.socket(zmq.XSUB)
+        xsub_socket = self._context.socket(zmq.XSUB)
         xsub_socket.setsockopt(zmq.LINGER, 0)
         xsub_socket.connect(address)
 
-        xpub_socket = self.context.socket(zmq.XPUB)
+        xpub_socket = self._context.socket(zmq.XPUB)
         xpub_socket.setsockopt(zmq.LINGER, 0)
-        xpub_socket.connect(self.worker_url)
+        xpub_socket.connect(self._worker_url)
 
         capture_socket = None
         capture_socket_address = f"inproc://{name}_cap_socket_debug"
         if log_chatter:
-            capture_socket = self.context.socket(zmq.PUB)
+            capture_socket = self._context.socket(zmq.PUB)
             capture_socket.setsockopt(zmq.LINGER, 0)
             capture_socket.bind(capture_socket_address)
 
-        ctrl_socket = self.context.socket(zmq.PAIR)
+        ctrl_socket = self._context.socket(zmq.PAIR)
         ctrl_socket.setsockopt(zmq.LINGER, 0)
         ctrl_socket_address = f"inproc://{name}_stream_proxy_control"
         ctrl_socket.bind(ctrl_socket_address)
@@ -207,7 +185,7 @@ class ZMQStreamServer:
                                                 "control": ctrl_socket},
                                          daemon=True)
         self._zmq_streams[name].start()
-        ext_ctrl_socket = self.context.socket(zmq.PAIR)
+        ext_ctrl_socket = self._context.socket(zmq.PAIR)
         ext_ctrl_socket.connect(ctrl_socket_address)
         self._zmq_stream_ctrl_sockets[name] = ext_ctrl_socket
         # pause if not enabled. (We can't start paused, so approximate.)
@@ -221,7 +199,7 @@ class ZMQStreamServer:
         def log_socket_chatter(self):
             """Capture data from the relayed zmq stream and log it (unless it
             is "large"). Useful for diagnosing issues."""
-            cap_sub_socket = self.context.socket(zmq.SUB)
+            cap_sub_socket = self._context.socket(zmq.SUB)
             cap_sub_socket.subscribe("")
             cap_sub_socket.connect(capture_socket_address)
             while True:
@@ -260,9 +238,9 @@ class ZMQStreamServer:
     def _stream_worker(self, frequency_hz: float, ):
         """Periodically broadcast all functions at the specified frequency.
         If there's nothing to do, exit."""
-        socket = self.context.socket(zmq.PUB)
+        socket = self._context.socket(zmq.PUB)
         socket.setsockopt(zmq.LINGER, 0)
-        socket.connect(self.worker_url)
+        socket.connect(self._worker_url)
         sleep_interval_s = 1.0/frequency_hz
         try:
             while self._keep_broadcasting.is_set():
@@ -270,23 +248,24 @@ class ZMQStreamServer:
                 with self._locks_by_frequency[frequency_hz]:
                     if not self._calls_by_frequency[frequency_hz]: # exit.
                         break
-                    for func_name in self._calls_by_frequency[frequency_hz]:
-                        if func_name not in self._call_enabled:
+                    for stream_name in self._calls_by_frequency[frequency_hz]:
+                        if stream_name not in self._call_enabled:
                             continue
                         # Invoke the function and dispatch the result.
-                        func, args, kwargs = self._call_signature[func_name]
+                        func, args, kwargs = self._call_signature[stream_name]
                         try:
+                            success = True
                             result = func(*args, **kwargs)
                         except Exception as e:
-                            self.log.error(f"func: {func_name}("
+                            self.log.error(f"For stream: {stream_name}, "
+                                           f"func: {func.__name__}("
                                            f"{', '.join([str(a) for a in args])}"
                                            f"{', ' if (len(args) and len(kwargs)) else ''}"
                                            f"{', '.join([str(k) + '=' + str(v) for k, v in kwargs.items()])}) "
                                            f"raised an exception while executing: {str(e)}")
+                            success = False
                             result = e
-                        # Send topic name and result as packed binary data in
-                        # *one* message so Subscriber topic filtering works.
-                        self._send(socket, func_name, result, timestamp=now())
+                        _send(socket, name=stream_name, data=result, success=success)
                 sleep(sleep_interval_s)
         finally:
             if self._calls_by_frequency[frequency_hz]:
@@ -294,14 +273,23 @@ class ZMQStreamServer:
             socket.close()
 
     def enable(self, name: str):
-        """Enable a previously-configured stream by name.
+        """Enable broadcasting of a stream by name. Any connected
+        :py:class:`~one_liner.client.RouterClient` will start receiving data
+        from this stream after they have configured how to buffer the stream
+        data with :py:meth:`~one_liner.client.RouterClient.configure_stream`.
+
+        :param name: stream name
+        :raises KeyError: if the stream name does not exist.
+        :raises ValueError: if the stream exists but cannot be enabled/disabled.
 
         .. note::
-           Enabling/disabling streams applies to periodically called streams
-           and relayed zmq streams but not streams sending data via
-           manually-called broadcast functions.
+           Enabling streams only works for periodically-added streams
+           added with :py:meth:`~one_liner.server.RouterServer.add_stream` and
+           :py:meth:`~one_liner.server.RouterServer.add_zmq_stream` but
+           *not* :py:meth:`~one_liner.server.RouterServer.get_stream_fn`.
 
         """
+
         # Enable zmq stream
         if name in self._zmq_streams:
             self._zmq_stream_ctrl_sockets[name].send_string("RESUME")
@@ -312,8 +300,8 @@ class ZMQStreamServer:
             return
         # Error if we got here
         if name in self._manual_broadcast_sockets:
-            raise KeyError(f"Stream: {name} cannot be enabled or disabled.")
-        raise KeyError(f"Stream: {name} is not configured.")
+            raise ValueError(f"Stream: {name} cannot be enabled or disabled.")
+        raise KeyError(f"Stream: {name} does not exist.")
 
     def disable(self, name: str):
         """Disable a previously-configured stream by name.
@@ -321,6 +309,7 @@ class ZMQStreamServer:
         :param name: the stream name
 
         """
+        # FIXME: handle other edge cases like in enable.
         del self._call_enabled[name]
 
     def _get_return_type(self, name: str) -> str | None:
@@ -359,4 +348,4 @@ class ZMQStreamServer:
         for socket in self._zmq_stream_ctrl_sockets.values():
             socket.send_string("TERMINATE")
         if not self._context_managed_externally:
-            self.context.term()
+            self._context.term()

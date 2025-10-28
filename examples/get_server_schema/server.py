@@ -24,7 +24,7 @@ if __name__ == "__main__":
     for i in range(NUM_STREAMS): # Create a few streams
         print(f"Adding broadcast: 1hz_side[{i}] sampled at {SAMPLE_RATES_HZ[i]} Hz")
         # Set sample and signal rates.
-        server.add_broadcast(f"1hz_sine[{i}]", SAMPLE_RATES_HZ[i],
+        server.add_stream(f"1hz_sine[{i}]", SAMPLE_RATES_HZ[i],
                              sine_t, 1, i*2*pi/NUM_STREAMS)
     server.run()  # Start broadcast and rpc threads.
     try:

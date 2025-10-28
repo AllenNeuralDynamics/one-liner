@@ -1,4 +1,4 @@
-from one_liner import Encoding
+from one_liner.utils import Encoding
 from pydantic import BaseModel, computed_field, field_serializer, model_serializer, AfterValidator, Field
 from pydantic import ValidationError
 from typing import Optional

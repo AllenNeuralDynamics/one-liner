@@ -20,7 +20,7 @@ if __name__ == "__main__":
                                    broadcast_port="5558",
                                    context=context)
     # Create broadcast function for sending video.
-    broadcast_live_video = internal_server.get_broadcast_fn(VIDEO_FEED_NAME)
+    broadcast_live_video = internal_server.get_stream_fn(VIDEO_FEED_NAME)
     internal_server.run()  # Start rpc thread.
 
     # Create a RouterServer to connect to GUI clients.

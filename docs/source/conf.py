@@ -52,6 +52,7 @@ html_theme_options = {
 
 # If true, "Created using Sphinx" is shown in the HTML footer. Default is True.
 autoclass_content = 'both'
+autodoc_member_order = 'bysource'
 toc_object_entries_show_parents = 'hide'
 html_show_sphinx = False
 

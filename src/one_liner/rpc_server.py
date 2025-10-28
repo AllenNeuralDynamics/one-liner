@@ -1,7 +1,7 @@
 import logging
 import pickle
 import zmq
-from one_liner import Protocol
+from one_liner.utils import _send, Protocol
 from threading import Thread, Event
 
 
@@ -35,15 +35,6 @@ class ZMQRPCServer:
                                      daemon=True)
         self._receive_thread.start()
 
-    def _call(self, device_name: str, method_name: str, *args, **kwargs):
-        """Lookup the call, invoke it, and return the result."""
-        if device_name not in self.devices:
-            raise ValueError(f"{device_name} is not present in devices.")
-        device = self.devices[device_name]
-        func = getattr(device, method_name)  # Might raise AttributeError
-        # Call the function and return the result.
-        return func(*args, **kwargs)
-
     def _receive_worker(self):
         """Wait for requests, call requested function, and return the reply.
         Launched in a thread.
@@ -55,9 +46,29 @@ class ZMQRPCServer:
                 continue
             request = pickle.loads(pickled_request)
             device_name, method_name, args, kwargs = request
-            reply = self._call(device_name, method_name, *args, **kwargs)
-            # Set copy=False since we have a pickled representation of the data.
-            self.socket.send(pickle.dumps(reply), copy=False)
+            if device_name not in self.devices:
+                error_msg = f"{device_name} is not present in devices."
+                self.log.error(error_msg)
+                _send(self.socket, name="", data=error_msg, success=False)
+                continue
+            device = self.devices[device_name]
+            try:
+                func = getattr(device, method_name)  # Might raise AttributeError
+            except AttributeError as e:
+                self.log.error(f"Instance {device} does not have attribute: "
+                               f"{method_name}. Error: {str(e)}")
+                _send(self.socket, name="", data=str(e), success=False)
+                continue
+            try:
+                reply = func(*args, **kwargs)
+                _send(self.socket, name="", data=reply)
+            except Exception as e:  # catch-all error calling the function.
+                self.log.error(f"func: {method_name}("
+                               f"{', '.join([str(a) for a in args])}"
+                               f"{', ' if (len(args) and len(kwargs)) else ''}"
+                               f"{', '.join([str(k) + '=' + str(v) for k, v in kwargs.items()])}) "
+                               f"raised an exception while executing: {str(e)}")
+                _send(self.socket, name="", data=str(e), success=False)
 
     def close(self):
         self._keep_receiving.clear()

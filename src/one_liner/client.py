@@ -3,9 +3,9 @@
 import logging
 import pickle
 import zmq
-from typing import Any, Literal, Tuple
-from one_liner import Protocol
 from one_liner.stream_schema import Streams
+from one_liner.utils import Protocol, RPCException, StreamException
+from typing import Any, Literal, Tuple
 
 
 class RouterClient:
@@ -48,15 +48,22 @@ class RouterClient:
                                              port=broadcast_port,
                                              context=self._context)
 
-    def call(self, instance_name: str, callable_name: str, *args, **kwds) -> Any:
-        """Call a function/method in the scope of the connected
-        :py:class:`~one_liner.server.RouterServer` and return the response.
+    def call(self, obj_name: str, attr_name: str, *args, **kwds) -> Tuple[float, Any]:
+        """Call a function/method within the scope of the connected
+        :py:class:`~one_liner.server.RouterServer` and return the result.
+
+        :param obj_name: object name. (Class instance or module)
+        :param attr_name: a callable attribute
+        :param \\*args:
+        :param \\*\\*kwargs:
+        :raises RPCException: if the underlying function call raises an exception
 
         .. note::
            This is a blocking call that returns after the response has been
            returned.
+
         """
-        return self.rpc_client.call(instance_name, callable_name, *args, **kwds)
+        return self.rpc_client.call(obj_name, attr_name, *args, **kwds)
 
     def configure_stream(self, name: str,
                          storage_type: Literal["queue", "cache"] = "queue"):
@@ -80,23 +87,62 @@ class RouterClient:
         value is a :py:class:`~one_liner.server.RouterServer`-specified
         timestamp and the second value is the stream data..
 
-        .. note::
+        :param name: stream name
+        :param block: if true, block until new data arrives.
+        :raises zmq.Again: if block is False (default) and no data is present.
+        :raises StreamException: if the connected
+           :py:class:`~one_liner.serverRouterServer`'s underlying function call
+           raised an exception.
+
+        .. warning::
            This stream must first be configured with :func:`configure_stream`.
         """
         return self.stream_client.get(name, block=block)
 
     def enable_stream(self, name: str):
-        """Enable broadcasting of a stream by name."""
+        """Enable broadcasting of a stream by name. The connected
+        :py:class:`~one_liner.server.RouterServer` will start periodically calling
+        the underlying stream function, and calls to `get_stream(name)`
+        will return new data.
+
+        :param name: stream name
+
+        .. note::
+           Enabling streams only works for periodically-added streams
+           added with :py:meth:`~one_liner.server.RouterServer.add_stream` and
+           :py:meth:`~one_liner.server.RouterServer.add_zmq_stream` but
+           *not* :py:meth:`~one_liner.server.RouterServer.get_stream_fn`.
+
+        """
         # Use rpc_client to enable/disable streams.
         return self.rpc_client.call("__streamer", "enable", name)
 
     def disable_stream(self, name: str):
-        """Disable broadcasting of a stream by name."""
+        """Disable broadcasting of a stream by name. The connected
+        :py:class:`~one_liner.server.RouterServer` will stop periodically calling
+        the underlying stream function, and calls to `get_stream(name)`
+        will return no new data.
+
+        :param name: stream name.
+
+        .. note::
+           Disabling streams only works for periodically-added streams
+           added with :py:meth:`~one_liner.server.RouterServer.add_stream` and
+           :py:meth:`~one_liner.server.RouterServer.add_zmq_stream` but
+           *not* :py:meth:`~one_liner.server.RouterServer.get_stream_fn`.
+
+        """
         # Use rpc_client to enable/disable streams.
         return self.rpc_client.call("__streamer", "disable", name)
 
-    def get_stream_configurations(self) -> Streams | dict:
-        return self.rpc_client.call("__streamer", "get_configuration")
+    def get_stream_configurations(self, as_dict: bool = False) -> Streams | dict:
+        """Get the configuration for all streams.
+
+        :param as_dict: if `True`, get the schema representation as a dict.
+           Otherwise, return a :py:class:`~one_liner.stream_schema.Streams`.
+
+        """
+        return self.rpc_client.call("__streamer", "get_configuration", as_dict)[1]
 
     def close(self):
         """Close the connection to the :py:class:`~one_liner.server.RouterServer`."""
@@ -113,11 +159,18 @@ class ZMQRPCClient:
         address = f"{protocol}://{interface}:{port}"
         self.socket.connect(address)
 
-    def call(self, obj_name: str, method_name: str, *args, **kwargs):
-        """Call a function and return the result."""
-        self.socket.send(pickle.dumps((obj_name, method_name, args, kwargs)))
-        # TODO: no real exception-handling here yet.
-        return pickle.loads(self.socket.recv())
+    def call(self, obj_name: str, attr_name: str, *args, **kwargs) -> Tuple[float, Any]:
+        """Call a remote function available to the connected
+        :py:class:`~one_liner.server.RouterServer` and return the result.
+
+        """
+        self.socket.send(pickle.dumps((obj_name, attr_name, args, kwargs)), copy=False)
+        # TODO: should unpacking data be encoding-specific for RPCs?
+        #   We would need to get this from a request for a schema a-priori.
+        success, timestamp, data = pickle.loads(self.socket.recv())
+        if not success:
+            raise RPCException(data)
+        return timestamp, data
 
     def close(self):
         self.socket.close()
@@ -165,12 +218,17 @@ class ZMQStreamClient:
     def get(self, stream_name: str, block: bool = False) -> Tuple[float, any]:
         """Return the timestamped data.
 
-        :raises zmq.Again: if block is False (default) and no data is present.
+        :raises zmq.Again: if block is `False` (default) and no data is present.
+        :raises StreamException: if the underlying function raised an exception
+           while being executed.
         """
         flags = 0 if block else zmq.NOBLOCK
         pickled_data = self.sub_sockets[stream_name].recv(flags=flags)
         offset = len(stream_name)
-        return pickle.loads(pickled_data[offset:])  # Strip off topic prefix.
+        success, timestamp, data = pickle.loads(pickled_data[offset:])  # Strip off topic prefix.
+        if not success:
+            raise StreamException(str(data))
+        return timestamp, data
 
     def close(self):
         for name, socket in self.sub_sockets.items():

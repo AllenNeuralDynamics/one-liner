@@ -62,7 +62,31 @@ pip install -e .[examples]
 ## Quickstart
 
 ### Remote Function Execution
-TODO
+In the PC acting as the server:
+```python
+from one_liner.server import RouterServer
+from threading import Event
+
+class Horn:
+  def beep(self):
+    return "Boop!"
+  
+my_horn = Horn()
+
+server = RouterServer(devices={"my_horn": my_horn})
+server.run()
+
+while True: # Nothing to do! Object control happens in another thread.
+    Event().wait() # or time.sleep(SHORT_DELAY)
+```
+
+In the PC acting as the client:
+```python
+from one_liner.client import RouterClient
+
+client = RouterClient()
+result = client.call("my_horn", "beep") # call a func/method w/ args & kwargs; return the result.
+```
 
 ### Streaming Data
 There are three ways to stream data from a `RouterServer` to one or more `RouterClient` objects.
@@ -76,12 +100,12 @@ import cv2
 video = cv2.VideoCapture(0) # Get the first available camera.
 
 def get_frame():
-  return video.read()[1] # skip the timestamp; just get the frame.
+  return video.read()[1] # just get the frame.
 
 server = RouterServer()
-server.add_broadcast("live_video", # name of the stream
-                     30,  # How fast to call this function.
-                     get_frame) # func to call (no *args or **kwargs in this case).
+server.add_stream("live_video", # name of the stream
+                  30,  # How fast to call this function.
+                  get_frame) # func to call (no *args or **kwargs in this case).
 server.run(run_in_thread=False)  # block, but we can not-block if set to True. That's it!
 ```
 
