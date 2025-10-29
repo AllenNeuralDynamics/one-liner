@@ -1,5 +1,7 @@
-# one-liner
+# one-liner 🐍 ⟵ 🚂 ⟵ 🐍
 [![License](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
+
+
 
 <img src="./assets/train-conductor-mouse.png" width="160">
 
@@ -155,10 +157,23 @@ It's just the same example client code as before.
 **TODO**: see the examples folder for now.
 
 ### Handling Received Data
-**TODO**: cache vs queue.
 
+There are two ways to handle received data:
+If you need every message, use `'queue'`, where messages will fill up an internal client-side FIFO buffer.
+If you only need to work off of the latest message, use `'cache'`, where only the most recently available message will be available on the client side.
+In the PC acting as the client:
+```python
+client = RouterClient()
+client.configure_stream("live_video", storage_type="cache")  # or 'queue' (default)
+```
 ### Controlling Data Streams
-TODO
+Streamed data can be enabled or disabled such that messages from the server will or will not be sent to all clients for a given stream.
+To do this, simply enable or disable an existing stream by name:
+```python
+client.enable_stream("live_video")  # the connected Router will not send this strea 
+# ...
+client.disable_stream("live_video")  # the connected Router will send the stream
+```
 
 ## Implementation Details
 
