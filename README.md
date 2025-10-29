@@ -33,7 +33,7 @@ Interface-wise, this package tries not to commit the user to adopting a specific
 
 ## Package Installation with uv
 
-To install and develop this package run:
+To install and develop this package, from the project root directory, run:
 ```bash
 uv sync
 ```
@@ -46,7 +46,7 @@ uv sync --extra examples
 
 ## Package Installation with Pip
 
-To install this package, in the root directory, run
+To install this package, from the project root directory, run
 ```bash
 pip install .
 ```
@@ -238,11 +238,15 @@ pip install -e .[docs]
 ```
 
 ### Building the Docs
-To generate the rst files source files for documentation from this directory, run
+<!--
+To generate the rst files source files for documentation, from this directory, run
 ```bash
 uv run sphinx-apidoc -o docs/source/ src
 ```
-Then, to create the documentation HTML files, run
+(You only need to do this once.)
+-->
+
+To update the documentation and generate HTML files, from the project root directory, run
 ```bash
 uv run sphinx-build -b html docs/source/ docs/_build/html
 ```
