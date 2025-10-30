@@ -7,8 +7,9 @@ name: Test Lint and Type Check
 #      - main
 #      - dev
 #    types: [opened, synchronize, reopened, ready_for_review]
-jobs: 
-  tests-lint-and-type-check: 
+jobs:
+  # Job 1: Linters and Type Checkers
+  tests-lint-and-type-check:
     runs-on: self-hosted-good
     env: 
       UV_PYTHON_INSTALL_DIR: C:\ProgramData\AIBS_MPE\uv_python
@@ -30,3 +31,26 @@ jobs:
     - name: Type check with mypy 
       run: |
         uv run mypy src/mypackage --strict
+
+  # Job 2: Build Documentation for Pushes to Main
+  build-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python version
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Docs Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r docs/requirements.txt
+
+      - name: Generate API Docs
+        run: sphinx-apidoc -o docs/source/ src
+
+      - name: Build Sphinx HTML Documentation
+        run: sphinx-build -b html docs/source docs/_build
