@@ -33,7 +33,7 @@ class ZMQStreamServer:
         # without needing to use any Python semantics (locks, etc).
         self._worker_url = f"inproc://workers:{id(self)}"  # unique per instance
         self._xsub_socket = self._context.socket(zmq.XSUB)
-        self._xsub_socket.setsockopt(zmq.LINGER, 0)
+        self._xsub_socket.setsockopt(zmq.LINGER, 0) # Close as soon as the context terminates.
         self._xsub_socket.bind(self._worker_url)
         self._xpub_socket = self._context.socket(zmq.XPUB)
         self._xpub_socket.setsockopt(zmq.LINGER, 0)

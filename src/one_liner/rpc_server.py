@@ -18,8 +18,9 @@ class ZMQRPCServer:
         self.context = context or zmq.Context()
         self.context_managed_externally = context is not None
         self.socket = self.context.socket(zmq.REP)
-        self.socket.setsockopt(zmq.RCVTIMEO, 100)  # milliseconds
-        self.socket.setsockopt(zmq.LINGER, 0)
+        self.socket.setsockopt(zmq.RCVTIMEO, 100)  # timeout for recv() in [ms].
+                                                   # >0 but value is kinda arbitrary.
+        self.socket.setsockopt(zmq.LINGER, 0)  # close immediately when context terminates
         address = f"{protocol}://{interface}:{self.port}"
         self.socket.bind(address)
         self._keep_receiving = Event()

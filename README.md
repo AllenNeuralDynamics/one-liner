@@ -166,6 +166,8 @@ In the PC acting as the client:
 client = RouterClient()
 client.configure_stream("live_video", storage_type="cache")  # or 'queue' (default)
 ```
+Note that configuring a stream also enables it.
+
 ### Controlling Data Streams
 Streamed data can be enabled or disabled such that messages from the server will or will not be sent to all clients for a given stream.
 To do this, simply enable or disable an existing stream by name:

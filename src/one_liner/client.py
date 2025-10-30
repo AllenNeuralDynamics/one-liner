@@ -181,20 +181,14 @@ class ZMQStreamClient:
     and receive periodically broadcasted function call results."""
 
     def __init__(self, protocol: Protocol = "tcp", interface: str = "localhost",
-                 port: str = "5556", stream_cfg: dict = None,
-                 context: zmq.Context = None):
+                 port: str = "5556", context: zmq.Context = None):
         """
-        :param stream_cfg: if specified, configure streams specified in the
-            provided config.
         """
         # Receive periodic broadcasted messages setup.
         self.log = logging.getLogger(self.__class__.__name__)
         self.context = context or zmq.Context()
         self.address = f"{protocol}://{interface}:{port}"
         self.sub_sockets = {}
-        if stream_cfg:
-            for stream_name, storage_type in stream_cfg.items():
-                self.configure_stream(stream_name, storage_type)
 
     def configure_stream(self, name: str,
                          storage_type: Literal["queue", "cache"] = "queue"):
