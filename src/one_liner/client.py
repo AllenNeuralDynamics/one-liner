@@ -4,7 +4,7 @@ import logging
 import pickle
 import zmq
 from one_liner.stream_schema import Streams
-from one_liner.utils import Protocol, RPCException, StreamException
+from one_liner.utils import Protocol, RPCException, StreamException, DESERIALIZERS, _recv
 from typing import Any, Literal, Tuple
 
 
@@ -165,9 +165,7 @@ class ZMQRPCClient:
 
         """
         self.socket.send(pickle.dumps((obj_name, attr_name, args, kwargs)), copy=False)
-        # TODO: should unpacking data be encoding-specific for RPCs?
-        #   We would need to get this from a request for a schema a-priori.
-        success, timestamp, data = pickle.loads(self.socket.recv())
+        success, timestamp, data = _recv(self.socket, deserializer="pickle")
         if not success:
             raise RPCException(data)
         return timestamp, data
@@ -216,10 +214,9 @@ class ZMQStreamClient:
         :raises StreamException: if the underlying function raised an exception
            while being executed.
         """
-        flags = 0 if block else zmq.NOBLOCK
-        pickled_data = self.sub_sockets[stream_name].recv(flags=flags)
-        offset = len(stream_name)
-        success, timestamp, data = pickle.loads(pickled_data[offset:])  # Strip off topic prefix.
+        flag = 0 if block else zmq.NOBLOCK
+        success, timestamp, data = _recv(self.sub_sockets[stream_name], flag=flag,
+                                         prefix=stream_name, deserializer="pickle")
         if not success:
             raise StreamException(str(data))
         return timestamp, data

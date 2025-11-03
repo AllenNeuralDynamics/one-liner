@@ -101,7 +101,7 @@ class RouterServer:
                                      log_chatter=log_chatter)
 
     def get_stream_fn(self, name: str, set_timestamp: bool = False,
-                      encoding: Encoding = "pickle"):
+                      serializer: Encoding | Callable = "pickle"):
         """Get a function to broadcast the specified stream name.
         Useful if the application is creating data at its
         own rate and needs a callback function to call upon producing new data.
@@ -109,7 +109,8 @@ class RouterServer:
         This implicitly adds a manual stream to the configuration.
 
         :param name: stream name
-        :param encoding: `pickle` only for now.
+        :param serializer: callable function to serialize the data or string
+            representation of a built-in serializer.
         :param set_timestamp: if true, return a function who's first argument is
             the timestamp to be set for the packet.
 
@@ -124,7 +125,7 @@ class RouterServer:
                send_func(new_frame)
 
         """
-        return self.streamer.get_stream_fn(name, encoding=encoding,
+        return self.streamer.get_stream_fn(name, serializer=serializer,
                                            set_timestamp=set_timestamp)
 
     def enable_stream(self, name):

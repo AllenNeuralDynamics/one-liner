@@ -1,8 +1,9 @@
 import json
+import struct
 import pickle
 import zmq
 from time import perf_counter as now
-from typing import Any, Literal
+from typing import Any, Literal, Callable, Tuple
 
 Protocol = Literal["tcp", "inproc", "ipc", "ws", "wss"]
 Encoding = Literal[None, "pickle", "json", "unspecified"]
@@ -15,10 +16,17 @@ SERIALIZERS = \
         "json": json.dumps
     }
 
+DESERIALIZERS = \
+    {
+        None: lambda x: x,
+        "pickle": pickle.loads,
+        "json": json.loads
+    }
+
 
 def _send(socket: zmq.Context.socket, name: str, data: bytes | Any,
           timestamp: float = None, success: bool = True,
-          encoding: Encoding = "pickle"):
+          serializer: Encoding | Callable = "pickle"):
     """Send the data on tne specified socket prefixed with the specified
     stream name. Used in both RPC and StreamServer
 
@@ -31,22 +39,51 @@ def _send(socket: zmq.Context.socket, name: str, data: bytes | Any,
     :param success: True if the data being sent was returned from a function
        that did not raise an exception. False otherwise.
        If False, the data is considered an exception string.
-    :param encoding: the encoding option which to encode the data or `None`
+    :param serializer: the encoding option which to encode the data or `None`
        if the data is `bytes`-like. Default is `"pickle"`.
 
     """
     timestamp = timestamp if timestamp is not None else now()
-    # Because the CONFLATE option (keep-last-message) only, doesn't work
+    # Because the zmq CONFLATE option (keep-last-message) only, doesn't work
     # with multipart messages where the first msg is the topic, we smush
     # the topic and data together as packed binary data before sending so that
     # topic filtering (i.e: subscriptions) work.
-    packet = name.encode("utf-8") + SERIALIZERS[encoding]((success, timestamp, data))
+
+    # It's a little clunky that we need to send the size of the pickled
+    # metadata, but it prevents us from doing an extra copy into a
+    # io.BytesIO object on the receiving end.
+    metadata_bytes = pickle.dumps((success, timestamp))
+    metadata_num_bytes = len(metadata_bytes)
+    serialize = SERIALIZERS.get(serializer, serializer)
+    packet = name.encode("utf-8") + \
+             struct.pack("<H", metadata_num_bytes) + metadata_bytes + serialize(data)
     # Set copy=False since we have a pickled representation of the data.
     socket.send(packet, copy=False)
 
 
+def _recv(socket: zmq.Context.socket, flag: zmq.Flag = 0, prefix: str | None = None,
+          deserializer: Encoding | Callable = "pickle") -> Tuple[bool, float, Any]:
+    """Receive data from a zmq socket and deserialize it.
+
+    :param flag: additional zmq flag to pass to the socket
+    :param deserializer: the encoding option which to encode the data or `None`
+       if the data is `bytes`-like. Default is `"pickle"`.
+    """
+    raw_bytes_slice = socket.recv(copy=False, flags=flag)  # Get a view; don't copy yet.
+    raw_bytes = memoryview(raw_bytes_slice)
+    prefix_len = 0 if prefix is None else len(prefix)
+    # Upack metadata first with pickle.
+    metadata_num_bytes = struct.unpack("<H", raw_bytes[prefix_len:prefix_len + 2])[0]
+    success, timestamp = pickle.loads(raw_bytes[prefix_len + 2:])
+    # Unpack payload with deserializer of choice.
+    deserialize = DESERIALIZERS.get(deserializer, deserializer)
+    data = deserialize(raw_bytes[prefix_len + 2 + metadata_num_bytes:])
+    return success, timestamp, data
+
+
 class RPCException(Exception):
     pass
+
 
 class StreamException(Exception):
     pass
