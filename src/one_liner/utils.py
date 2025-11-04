@@ -56,7 +56,8 @@ def _send(socket: zmq.Context.socket, name: str, data: bytes | Any,
     metadata_num_bytes = len(metadata_bytes)
     serialize = SERIALIZERS.get(serializer, serializer)
     packet = name.encode("utf-8") + \
-             struct.pack("<H", metadata_num_bytes) + metadata_bytes + serialize(data)
+             struct.pack("<H", metadata_num_bytes) + metadata_bytes + \
+             serialize(data)
     # Set copy=False since we have a pickled representation of the data.
     socket.send(packet, copy=False)
 

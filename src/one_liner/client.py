@@ -4,11 +4,13 @@ import logging
 import pickle
 import zmq
 from one_liner.stream_schema import Streams
-from one_liner.utils import Protocol, RPCException, StreamException, DESERIALIZERS, _recv
-from typing import Any, Literal, Tuple
+from one_liner.utils import Protocol, Encoding, RPCException, StreamException, DESERIALIZERS, _recv
+from typing import Any, Callable, Literal, Tuple
 
 
 class RouterClient:
+
+    __slots__ = ("_context", "rpc_client", "stream_client")
 
     def __init__(self, protocol: Protocol = "tcp", interface: str = "localhost",
                  rpc_port: str = "5555", broadcast_port: str = "5556",
@@ -48,14 +50,18 @@ class RouterClient:
                                              port=broadcast_port,
                                              context=self._context)
 
-    def call(self, obj_name: str, attr_name: str, *args, **kwds) -> Tuple[float, Any]:
+    def call(self, obj_name: str, attr_name: str, args: list = None,
+             kwargs: dict = None,
+             deserializer: Encoding | Callable = "pickle") -> Tuple[float, Any]:
         """Call a function/method within the scope of the connected
         :py:class:`~one_liner.server.RouterServer` and return the result.
 
         :param obj_name: object name. (Class instance or module)
         :param attr_name: a callable attribute
-        :param \\*args:
-        :param \\*\\*kwargs:
+        :param deserializer: callable function to deserialize the data or
+            string-representation of one of the built-in options.
+        :param args: list of positional arguments for function call
+        :param kwargs: dict of keyword arguments for function call
         :raises RPCException: if the underlying function call raises an exception
 
         .. note::
@@ -63,7 +69,10 @@ class RouterClient:
            returned.
 
         """
-        return self.rpc_client.call(obj_name, attr_name, *args, **kwds)
+        args = [] if args is None else args
+        kwargs = {} if kwargs is None else kwargs
+        return self.rpc_client.call(obj_name, attr_name, args, kwargs,
+                                    deserializer=deserializer)
 
     def configure_stream(self, name: str,
                          storage_type: Literal["queue", "cache"] = "queue"):
@@ -82,13 +91,16 @@ class RouterClient:
         """
         self.stream_client.configure_stream(name, storage_type)
 
-    def get_stream(self, name: str, block: bool = False) -> Tuple[float, Any]:
+    def get_stream(self, name: str, block: bool = False,
+                   deserializer: Encoding | Callable = "pickle") -> Tuple[float, Any]:
         """Receive the results of a configured stream as 2-tuple where the first
         value is a :py:class:`~one_liner.server.RouterServer`-specified
         timestamp and the second value is the stream data..
 
         :param name: stream name
         :param block: if true, block until new data arrives.
+        :param deserializer: callable function to deserialize the data or
+            string-representation of one of the built-in options.
         :raises zmq.Again: if block is False (default) and no data is present.
         :raises StreamException: if the connected
            :py:class:`~one_liner.serverRouterServer`'s underlying function call
@@ -97,7 +109,7 @@ class RouterClient:
         .. warning::
            This stream must first be configured with :func:`configure_stream`.
         """
-        return self.stream_client.get(name, block=block)
+        return self.stream_client.get(name, block=block, deserializer=deserializer)
 
     def enable_stream(self, name: str):
         """Enable broadcasting of a stream by name. The connected
@@ -115,7 +127,7 @@ class RouterClient:
 
         """
         # Use rpc_client to enable/disable streams.
-        return self.rpc_client.call("__streamer", "enable", name)
+        return self.rpc_client.call("__streamer", "enable", args=[name])
 
     def disable_stream(self, name: str):
         """Disable broadcasting of a stream by name. The connected
@@ -133,7 +145,7 @@ class RouterClient:
 
         """
         # Use rpc_client to enable/disable streams.
-        return self.rpc_client.call("__streamer", "disable", name)
+        return self.rpc_client.call("__streamer", "disable", args=[name])
 
     def get_stream_configurations(self, as_dict: bool = False) -> Streams | dict:
         """Get the configuration for all streams.
@@ -142,7 +154,8 @@ class RouterClient:
            Otherwise, return a :py:class:`~one_liner.stream_schema.Streams`.
 
         """
-        return self.rpc_client.call("__streamer", "get_configuration", as_dict)[1]
+        return self.rpc_client.call("__streamer", "get_configuration",
+                                    kwargs={"as_dict": as_dict})[1]
 
     def close(self):
         """Close the connection to the :py:class:`~one_liner.server.RouterServer`."""
@@ -152,6 +165,8 @@ class RouterClient:
 
 class ZMQRPCClient:
 
+    __slots__ = ("context", "socket")
+
     def __init__(self, protocol: Protocol = "tcp", interface: str = "localhost",
                  port: str = "5555", context: zmq.Context = None):
         self.context = context or zmq.Context()
@@ -159,13 +174,16 @@ class ZMQRPCClient:
         address = f"{protocol}://{interface}:{port}"
         self.socket.connect(address)
 
-    def call(self, obj_name: str, attr_name: str, *args, **kwargs) -> Tuple[float, Any]:
+    def call(self, obj_name: str, attr_name: str, args: list = None, kwargs: dict = None,
+             deserializer: Encoding | Callable = "pickle") -> Tuple[float, Any]:
         """Call a remote function available to the connected
         :py:class:`~one_liner.server.RouterServer` and return the result.
 
         """
+        args = [] if args is None else args
+        kwargs = {} if kwargs is None else kwargs
         self.socket.send(pickle.dumps((obj_name, attr_name, args, kwargs)), copy=False)
-        success, timestamp, data = _recv(self.socket, deserializer="pickle")
+        success, timestamp, data = _recv(self.socket, deserializer=deserializer)
         if not success:
             raise RPCException(data)
         return timestamp, data
@@ -177,6 +195,7 @@ class ZMQRPCClient:
 class ZMQStreamClient:
     """Connect to an instrument server (likely running on an actual instrument)
     and receive periodically broadcasted function call results."""
+    __slots__ = ("log", "context", "address", "sub_sockets")
 
     def __init__(self, protocol: Protocol = "tcp", interface: str = "localhost",
                  port: str = "5556", context: zmq.Context = None):
@@ -207,8 +226,10 @@ class ZMQStreamClient:
         socket.connect(self.address)
         self.sub_sockets[name] = socket
 
-    def get(self, stream_name: str, block: bool = False) -> Tuple[float, any]:
+    def get(self, stream_name: str, block: bool = False,
+            deserializer: Encoding | Callable = None) -> Tuple[float, any]:
         """Return the timestamped data.
+
 
         :raises zmq.Again: if block is `False` (default) and no data is present.
         :raises StreamException: if the underlying function raised an exception
@@ -216,7 +237,7 @@ class ZMQStreamClient:
         """
         flag = 0 if block else zmq.NOBLOCK
         success, timestamp, data = _recv(self.sub_sockets[stream_name], flag=flag,
-                                         prefix=stream_name, deserializer="pickle")
+                                         prefix=stream_name, deserializer=deserializer)
         if not success:
             raise StreamException(str(data))
         return timestamp, data
