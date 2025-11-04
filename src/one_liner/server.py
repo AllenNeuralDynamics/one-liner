@@ -57,7 +57,8 @@ class RouterServer:
         self.streamer.run(run_in_thread=run_in_thread)
 
     def add_stream(self, name: str, frequency_hz: float, func: Callable,
-                      *args, **kwargs):
+                   args: list = None, kwargs: dict = None, enabled: bool = True,
+                   serializer: Encoding | Callable = "pickle"):
         """Create a stream. i.e: Setup a function to be called with specific
         arguments at a set frequency. If the function is already being
         broadcasted, update the broadcast parameters.
@@ -65,8 +66,12 @@ class RouterServer:
         :param name: stream name
         :param frequency_hz: frequency at which to call the underlying function
         :param func: function to call
-        :param \\*args: any function arguments
-        :param \\*\\*kwargs: any function keyword arguments
+        :param args: any function arguments
+        :param kwargs: any function keyword arguments
+        :param enabled: if true (default), start with the stream enabled.
+        :param serializer: callable function to serialize the data or string
+            representation of built-in serializer (or None if the data is
+            already serialized)
 
         .. code-block:: python
 
@@ -83,7 +88,8 @@ class RouterServer:
                              get_frame) # func to call.
            server.run()
         """
-        self.streamer.add(name, frequency_hz, func, *args, **kwargs)
+        self.streamer.add(name, frequency_hz, func, args=args, kwargs=kwargs,
+                          enabled=enabled, serializer=serializer)
 
     def add_zmq_stream(self, name: str, address: str, enabled: True,
                        log_chatter: bool = False):

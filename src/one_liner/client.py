@@ -69,8 +69,6 @@ class RouterClient:
            returned.
 
         """
-        args = [] if args is None else args
-        kwargs = {} if kwargs is None else kwargs
         return self.rpc_client.call(obj_name, attr_name, args, kwargs,
                                     deserializer=deserializer)
 

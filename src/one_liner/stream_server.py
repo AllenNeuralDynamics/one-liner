@@ -47,7 +47,7 @@ class ZMQStreamServer:
         self._zmq_stream_ctrl_sockets = {}
         # Periodic stream data structures
         self._call_signature: dict[str, tuple] = {}
-        self._call_encodings: dict[str, Encoding] = {}
+        self._call_encodings: dict[str, Encoding | Callable] = {}
         self._call_enabled: dict[str, bool] = {}
         self._calls_by_frequency: dict[float, set] = {}
         self._call_frequencies: dict[str, float] = {}
@@ -78,7 +78,9 @@ class ZMQStreamServer:
                                         daemon=True)
             self._proxy_thread.start()
 
-    def add(self, name: str, frequency_hz: float, func: Callable, *args, **kwargs):
+    def add(self, name: str, frequency_hz: float, func: Callable,
+            args: list = None, kwargs: dict = None, enabled: bool = True,
+            serializer: Encoding | Callable = "pickle"):
         """Create a stream. i.e: Setup a function to be called with specific
         arguments at a set frequency. If the function is already being
         broadcasted, update the broadcast parameters.
@@ -86,15 +88,20 @@ class ZMQStreamServer:
         :param name:
         :param frequency_hz:
         :param func:
-        :param \\*args:
-        :param \\*\\*kwargs:
+        :param args:
+        :param kwargs:
+        :param enabled:
+        :param serializer:
 
         """
         # Add/update func params and call frequency.
+        args = [] if args is None else args
+        kwargs = {} if kwargs is None else kwargs
         self._call_signature[name] = (func, args, kwargs)
         self._call_frequencies[name] = frequency_hz
-        self._call_encodings[name] = "pickle"  # FIXME: expose this as an option.
-        self.enable(name)
+        self._call_encodings[name] = serializer
+        if enabled:
+            self.enable(name)
         # Store call by frequency.
         call_names = self._calls_by_frequency.get(frequency_hz, set())
         self.log.debug(f"Adding stream: {name} @ {frequency_hz}[Hz].")
@@ -265,7 +272,8 @@ class ZMQStreamServer:
                                            f"raised an exception while executing: {str(e)}")
                             success = False
                             result = e
-                        _send(socket, name=stream_name, data=result, success=success)
+                        _send(socket, name=stream_name, data=result, success=success,
+                              serializer=self._call_encodings[stream_name])
                 sleep(sleep_interval_s)
         finally:
             if self._calls_by_frequency[frequency_hz]:
