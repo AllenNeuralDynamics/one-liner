@@ -4,7 +4,7 @@ import zmq
 from one_liner.stream_server import ZMQStreamServer
 from one_liner.rpc_server import ZMQRPCServer
 from one_liner.utils import Protocol, Encoding
-from typing import Callable
+from typing import Any, Callable
 
 
 class RouterServer:
@@ -14,7 +14,7 @@ class RouterServer:
 
     def __init__(self,  protocol: Protocol = "tcp", interface: str = "*",
                  rpc_port: str = "5555", broadcast_port: str = "5556",
-                 context: zmq.Context = None, **devices):
+                 context: zmq.Context = None, devices: dict[str, Any] = None):
         """constructor.
 
         :param protocol: a zmq supported protocol (tcp, inproc, etc)
@@ -23,6 +23,7 @@ class RouterServer:
         :param broadcast_port: port from which to stream periodic data.
         :param context: the zmq context. Will be created automatically if
             unspecified.
+        :param devices: dict of object instances, keyed by name
 
         .. warning::
            For sharing data within the same process using the `inproc` protocol,
@@ -43,9 +44,11 @@ class RouterServer:
                                         port=broadcast_port, context=self.context)
         # Pass streamer into RPC Server as another device so we can interact
         # with it remotely. Hide it with a "__" prefix.
+        devices = {} if devices is None else devices
+        devices.update({"__streamer": self.streamer})
         self.rpc = ZMQRPCServer(protocol=protocol, interface=interface,
                                 port=rpc_port, context=self.context,
-                                __streamer=self.streamer, **devices)
+                                devices=devices)
 
     def run(self, run_in_thread: bool = True):
         """Setup rpc listener and broadcaster.

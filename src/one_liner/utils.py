@@ -39,8 +39,9 @@ def _send(socket: zmq.Context.socket, name: str, data: bytes | Any,
     :param success: True if the data being sent was returned from a function
        that did not raise an exception. False otherwise.
        If False, the data is considered an exception string.
-    :param serializer: the encoding option which to encode the data or `None`
-       if the data is `bytes`-like. Default is `"pickle"`.
+    :param serializer: the encoding option to encode the data, `None`
+       if the data is `bytes`-like, or a user-supplied function to serialize
+       a bytes-like object. Default is `"pickle"`.
 
     """
     timestamp = timestamp if timestamp is not None else now()
@@ -67,11 +68,11 @@ def _recv(socket: zmq.Context.socket, flag: zmq.Flag = 0, prefix: str | None = N
     """Receive data from a zmq socket and deserialize it.
 
     :param flag: additional zmq flag to pass to the socket
-    :param deserializer: the encoding option which to encode the data or `None`
-       if the data is `bytes`-like. Default is `"pickle"`.
+    :param deserializer: the encoding option to decode the data, `None`
+       if the data is `bytes`-like, or a user-supplied function to deserialize
+       a bytes-like object. Default is `"pickle"`.
     """
-    raw_bytes_slice = socket.recv(copy=False, flags=flag)  # Get a view; don't copy yet.
-    raw_bytes = memoryview(raw_bytes_slice)
+    raw_bytes = socket.recv(copy=False, flags=flag).buffer  # Get a view; don't copy yet.
     prefix_len = 0 if prefix is None else len(prefix)
     # Upack metadata first with pickle.
     metadata_num_bytes = struct.unpack("<H", raw_bytes[prefix_len:prefix_len + 2])[0]

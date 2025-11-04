@@ -9,7 +9,7 @@ class Horn:
 
 if __name__ == "__main__":
     horn = Horn()
-    server = RouterServer(my_horn=horn)
+    server = RouterServer(devices={"my_horn": horn})
     server.run()
     try:
         while True:
