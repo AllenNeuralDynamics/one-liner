@@ -13,14 +13,14 @@ SERIALIZERS = \
     {
         None: lambda x: x,
         "pickle": pickle.dumps,
-        "json": json.dumps
+        "json": lambda x: json.dumps(x).encode("utf-8")
     }
 
 DESERIALIZERS = \
     {
         None: lambda x: x,
         "pickle": pickle.loads,
-        "json": json.loads
+        "json": lambda x: json.loads(bytes(x))
     }
 
 
