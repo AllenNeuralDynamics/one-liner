@@ -2,6 +2,7 @@
 
 import pytest
 import zmq
+from collections import deque
 from random import uniform
 from one_liner.client import RouterClient
 from one_liner.server import RouterServer
@@ -14,12 +15,20 @@ class SensorArray:
     __test__ = False
 
     def __init__(self):
-        pass
+        self.queue = None
+        self.reset_queue()
 
-    def get_data(self, sensor_index: int = 0):
+    def get_data(self, sensor_index: int = 0) -> dict[int, float]:
         """Get spoofed analog voltage sensor data: 0.0-5.0 [V] measurement from
             specified sensor index."""
         return {sensor_index: uniform(0., 5.)}
+
+    def reset_queue(self):
+        self.queue = deque(list(range(10)))
+
+    def get_series_item(self) -> int:
+        item = self.queue.popleft()
+        return item
 
 
 def test_caching_option():
@@ -34,9 +43,7 @@ def test_caching_option():
     RECV_INTERVAL = 1/RECV_RATE
 
     # Broadcast a method at 100 Hz.
-    server.add_broadcast("measurement", SEND_RATE, sensors.get_data, sensor_index)
-    # Add extraneous data to make sure topic filtering works.
-    server.add_broadcast("noise", SEND_RATE, sensors.get_data, sensor_index+1)
+    server.add_stream("measurement", SEND_RATE, sensors.get_data, args=[sensor_index])
     server.run()
 
     # Configure which topic to receive and how to store the data.
@@ -46,15 +53,11 @@ def test_caching_option():
     # Read messages slower than we send them.
     # Ensure we are getting the latest data.
     # Check adjacent timestamps to make sure they are similar to RECV_RATE
-    last_sample_time = now()
     old_tstamp = now()
     packet_deltas = []
     while ((now() - start_time) < 0.2):
-        curr_time = now()
         # Read messages at a slower rate than the publisher is publishing them.
-        if curr_time - last_sample_time < RECV_INTERVAL:
-            continue
-        last_sample_time = curr_time
+        sleep(RECV_INTERVAL)
         try:
             new_tstamp, new_data = client.get_stream("measurement")
             interpacket_delta_t = abs(new_tstamp - old_tstamp)
@@ -69,6 +72,42 @@ def test_caching_option():
     # *not* close to our send interval, which is faster.
     try:
         assert abs(average_recv_interval - RECV_INTERVAL) < RECV_INTERVAL * 0.1
+    finally:
+        client.close()
+        server.close()
+
+
+def test_get_last_sent_value():
+    sensor = SensorArray()
+    server = RouterServer()
+    client = RouterClient()
+    try:
+        # Configure stream to receive the **most recent** item only.
+        client.configure_stream("series_data", storage_type="cache")
+        send_element = server.get_stream_fn("series_data")
+        server.run()  # Make the connection with the client first.
+        sleep(0.1)  # Wait for all connections to take place
+        # Send one element of the series
+        last_element_sent = None
+        for i in range(3):
+            last_element_sent = sensor.get_series_item()
+            send_element(last_element_sent)
+            print(f"Sent: {last_element_sent}")
+        sleep(0.01)  # Wait for data to be transmitted.
+        # Receive and check the data.
+        data = client.get_stream("series_data")[1]
+        print(f"received: {data}")
+        assert data == last_element_sent
+        # Do it again:
+        for i in range(3):
+            last_element_sent = sensor.get_series_item()
+            send_element(last_element_sent)
+            print(f"Sent: {last_element_sent}")
+        sleep(0.01)  # Wait for data to be transmitted.
+        # Receive and check the data.
+        data = client.get_stream("series_data")[1]
+        print(f"Received: {data}")
+        assert data == last_element_sent
     finally:
         client.close()
         server.close()
