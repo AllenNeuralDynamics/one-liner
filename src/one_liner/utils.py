@@ -1,4 +1,4 @@
-import json
+import orjson
 import struct
 import pickle
 import zmq
@@ -13,14 +13,14 @@ SERIALIZERS = \
     {
         None: lambda x: x,
         "pickle": pickle.dumps,
-        "json": lambda x: json.dumps(x).encode("utf-8")
+        "json": orjson.dumps
     }
 
 DESERIALIZERS = \
     {
         None: lambda x: x,
         "pickle": pickle.loads,
-        "json": lambda x: json.loads(bytes(x))
+        "json": orjson.loads
     }
 
 
