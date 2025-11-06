@@ -40,7 +40,7 @@ class RouterServer:
 
         """
         self.context = context or zmq.Context.instance()
-        self._context_managed_externally = context is None
+        self._context_managed_externally = context is not None
         self.streamer = ZMQStreamServer(protocol=protocol, interface=interface,
                                         port=broadcast_port, context=self.context)
         # Pass streamer into RPC Server as another device so we can interact

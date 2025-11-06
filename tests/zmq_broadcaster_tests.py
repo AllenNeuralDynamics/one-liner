@@ -41,9 +41,8 @@ def test_client_receive():
     sensors = SensorArray()  # Create an object
     server = ZMQStreamServer()  # Create a server.
     client = ZMQStreamClient()  # Create a client.
-    client.run()
     # broadcast a method at 10[Hz].
-    server.add(f"sensor_{sensor_index}", 10, sensors.get_data, sensor_index)
+    server.add(f"sensor_{sensor_index}", 10, sensors.get_data, args=[sensor_index])
     sleep(0.05)
     start_time = now()
     try:
@@ -62,9 +61,8 @@ def test_live_add_remove_broadcast():
     sensors = SensorArray()  # Create an object
     server = ZMQStreamServer()  # Create a server.
     client = ZMQStreamClient()  # Create a client.
-    client.run()
     # broadcast a method at 10[Hz].
-    server.add(f"sensor_{sensor_index}", 10, sensors.get_data, sensor_index)
+    server.add(f"sensor_{sensor_index}", 10, sensors.get_data, args=[sensor_index])
     server.remove(f"sensor_{sensor_index}")
     # FIXME: thread should exit after removing the only periodic function.
     try:

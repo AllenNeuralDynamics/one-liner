@@ -122,7 +122,7 @@ class ZMQStreamServer:
         self._threads[frequency_hz] = broadcast_thread
 
     def get_stream_fn(self, name: str, set_timestamp: bool = False,
-                      serializer: Encoding | Callable = "pickle"):
+                      serializer: Encoding | Callable = "pickle") -> Callable:
         """Get a function to broadcast the specified stream name.
         Useful if the application is creating data at its
         own rate and needs a callback function to call upon producing new data.
@@ -136,7 +136,8 @@ class ZMQStreamServer:
 
         """
         if name not in self._manual_broadcast_sockets:
-            self.log.debug(f"Creating socket to manually broadcast stream: {name} to {self._worker_url}.")
+            self.log.debug(f"Creating socket to manually broadcast stream: "
+                           f"{name} to {self._worker_url}.")
             socket = self._context.socket(zmq.PUB)
             socket.setsockopt(zmq.LINGER, 0)
             socket.connect(self._worker_url)
@@ -163,7 +164,8 @@ class ZMQStreamServer:
         :param log_chatter:
 
         """
-        self.log.debug(f"Creating zmq proxy to forward messages from: {address} to {self._worker_url}")
+        self.log.debug(f"Creating zmq proxy to forward messages from: "
+                       f"{address} to {self._worker_url}")
         # Create XSUB and XPUB relay
         xsub_socket = self._context.socket(zmq.XSUB)
         xsub_socket.setsockopt(zmq.LINGER, 0)

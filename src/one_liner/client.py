@@ -52,10 +52,6 @@ class RouterClient:
                                              port=broadcast_port,
                                              context=self._context)
 
-#        if self.version != self.server_version:
-#            self._log.warning("client and server versions do not match! Client: "
-#                             f"{self.version}, Server: {self.server_version}")
-
     def call(self, obj_name: str, attr_name: str, args: list = None,
              kwargs: dict = None,
              deserializer: Encoding | Callable = "pickle") -> Tuple[float, Any]:
@@ -239,7 +235,7 @@ class ZMQStreamClient:
         self.sub_sockets[name] = socket
 
     def get(self, stream_name: str, block: bool = False,
-            deserializer: Encoding | Callable = None) -> Tuple[float, any]:
+            deserializer: Encoding | Callable = "pickle") -> Tuple[float, any]:
         """Return the timestamped data.
 
 
