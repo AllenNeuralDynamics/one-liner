@@ -110,7 +110,7 @@ class RouterServer:
                                      log_chatter=log_chatter)
 
     def get_stream_fn(self, name: str, set_timestamp: bool = False,
-                      serializer: Encoding | Callable = "pickle"):
+                      serializer: Encoding | Callable = "pickle") -> Callable:
         """Get a function to broadcast the specified stream name.
         Useful if the application is creating data at its
         own rate and needs a callback function to call upon producing new data.
