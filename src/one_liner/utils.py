@@ -9,14 +9,14 @@ Protocol = Literal["tcp", "inproc", "ipc", "ws", "wss"]
 Encoding = Literal[None, "pickle", "json", "unspecified"]
 
 
-SERIALIZERS = \
+SERIALIZERS: dict[Encoding, Callable] = \
     {
         None: lambda x: x,
         "pickle": pickle.dumps,
         "json": orjson.dumps
     }
 
-DESERIALIZERS = \
+DESERIALIZERS: dict[Encoding, Callable] = \
     {
         None: lambda x: x,
         "pickle": pickle.loads,
