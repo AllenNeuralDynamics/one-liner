@@ -35,3 +35,5 @@ docs = [
 [tool.pytest.ini_options]
 pythonpath = ["src", "tests"]
 
+[tool.ruff]
+line-length = 88
