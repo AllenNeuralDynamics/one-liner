@@ -75,7 +75,8 @@ class RouterClient:
                                     deserializer=deserializer)
 
     def configure_stream(self, name: str,
-                         storage_type: Literal["queue", "cache"] = "queue"):
+                         storage_type: Literal["queue", "cache"] = "queue",
+                         deserializer: Encoding | Callable = "pickle"):
         """Configure data received from a stream to either hold one the latest
         data (`cache`) or to hold onto all data in a buffer (`queue`) of
         size 1000.
@@ -87,20 +88,19 @@ class RouterClient:
            The ``"queue"`` option will buffer up to 1000 messages such that
            calling :func:`get_stream` will return data in a first-in-first-out
            (FIFO) manner.
+        :param deserializer: callable function to deserialize the data or
+            string-representation of one of the built-in options.
 
         """
-        self.stream_client.configure_stream(name, storage_type)
+        self.stream_client.configure_stream(name, storage_type, deserializer)
 
-    def get_stream(self, name: str, block: bool = False,
-                   deserializer: Encoding | Callable = "pickle") -> Tuple[float, Any]:
+    def get_stream(self, name: str, block: bool = False) -> Tuple[float, Any]:
         """Receive the results of a configured stream as 2-tuple where the first
         value is a :py:class:`~one_liner.server.RouterServer`-specified
         timestamp and the second value is the stream data..
 
         :param name: stream name
         :param block: if true, block until new data arrives.
-        :param deserializer: callable function to deserialize the data or
-            string-representation of one of the built-in options.
         :raises zmq.Again: if block is False (default) and no data is present.
         :raises StreamException: if the connected
            :py:class:`~one_liner.serverRouterServer`'s underlying function call
@@ -109,7 +109,7 @@ class RouterClient:
         .. warning::
            This stream must first be configured with :func:`configure_stream`.
         """
-        return self.stream_client.get(name, block=block, deserializer=deserializer)
+        return self.stream_client.get(name, block=block)
 
     def enable_stream(self, name: str):
         """Enable broadcasting of a stream by name. The connected
@@ -203,7 +203,7 @@ class ZMQRPCClient:
 class ZMQStreamClient:
     """Connect to an instrument server (likely running on an actual instrument)
     and receive periodically broadcasted function call results."""
-    __slots__ = ("log", "context", "address", "sub_sockets")
+    __slots__ = ("log", "context", "address", "sub_sockets", "deserializers")
 
     def __init__(self, protocol: Protocol = "tcp", interface: str = "localhost",
                  port: str = "5556", context: zmq.Context = None):
@@ -213,15 +213,18 @@ class ZMQStreamClient:
         self.log = logging.getLogger(self.__class__.__name__)
         self.context = context or zmq.Context()
         self.address = f"{protocol}://{interface}:{port}"
-        self.sub_sockets = {}
+        self.sub_sockets: dict[str, zmq.Context.socket] = {}
+        self.deserializers: dict[str, Encoding | Callable] = {}
 
     def configure_stream(self, name: str,
-                         storage_type: Literal["queue", "cache"] = "queue"):
+                         storage_type: Literal["queue", "cache"] = "queue",
+                         deserializer: Encoding | Callable = "pickle"):
         """Create a subscriber socket to receive a specific topic and setup
         how to buffer data.
         * queue -> FIFO.
         * cache -> only the latest data is received.
         """
+        self.deserializers[name] = deserializer
         # Create zmq socket and configure to either queue or get-the-latest data.
         socket = self.context.socket(zmq.SUB)
         self.log.debug(f"Creating socket for {name} stream and subscribing to topic: {name}.")
@@ -234,10 +237,8 @@ class ZMQStreamClient:
         socket.connect(self.address)
         self.sub_sockets[name] = socket
 
-    def get(self, stream_name: str, block: bool = False,
-            deserializer: Encoding | Callable = "pickle") -> Tuple[float, any]:
+    def get(self, stream_name: str, block: bool = False) -> Tuple[float, any]:
         """Return the timestamped data.
-
 
         :raises zmq.Again: if block is `False` (default) and no data is present.
         :raises StreamException: if the underlying function raised an exception
@@ -245,7 +246,8 @@ class ZMQStreamClient:
         """
         flag = 0 if block else zmq.NOBLOCK
         success, timestamp, data = _recv(self.sub_sockets[stream_name], flag=flag,
-                                         prefix=stream_name, deserializer=deserializer)
+                                         prefix=stream_name,
+                                         deserializer=self.deserializers[stream_name])
         if not success:
             raise StreamException(str(data))
         return timestamp, data
