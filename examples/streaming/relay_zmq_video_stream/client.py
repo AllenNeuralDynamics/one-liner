@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.DEBUG)
 if __name__ == "__main__":
 
     client = RouterClient()
-    client.configure_stream(VIDEO_FEED_NAME, storage_type="cache")
+    client.configure_stream(VIDEO_FEED_NAME, storage_type="cache", deserializer="blosc2")
 
     curr_time = now()
     last_time = curr_time

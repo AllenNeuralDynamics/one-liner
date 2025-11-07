@@ -1,5 +1,6 @@
 import orjson
 import struct
+import blosc2
 import pickle
 import zmq
 from time import perf_counter as now
@@ -13,6 +14,7 @@ SERIALIZERS: dict[Encoding, Callable] = \
     {
         None: lambda x: x,
         "pickle": pickle.dumps,
+        "blosc2": blosc2.pack_array2,
         "json": orjson.dumps
     }
 
@@ -20,6 +22,7 @@ DESERIALIZERS: dict[Encoding, Callable] = \
     {
         None: lambda x: x,
         "pickle": pickle.loads,
+        "blosc2": blosc2.unpack_array2,
         "json": orjson.loads
     }
 
