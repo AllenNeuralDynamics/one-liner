@@ -4,13 +4,14 @@ import logging
 import pickle
 import zmq
 from one_liner.stream_schema import Streams
+from one_liner import __version__ as local_version
 from one_liner.utils import Protocol, Encoding, RPCException, StreamException, DESERIALIZERS, _recv
 from typing import Any, Callable, Literal, Tuple
 
 
 class RouterClient:
 
-    __slots__ = ("_context", "rpc_client", "stream_client")
+    __slots__ = ("_log", "_context", "rpc_client", "stream_client")
 
     def __init__(self, protocol: Protocol = "tcp", interface: str = "localhost",
                  rpc_port: str = "5555", broadcast_port: str = "5556",
@@ -41,6 +42,7 @@ class RouterClient:
            `ipc` is for unix-like OSes only).
 
         """
+        self._log = logging.getLogger(self.__class__.__name__)
         self._context = context or zmq.Context.instance()
         # Share context between rpc and stream client
         self.rpc_client = ZMQRPCClient(protocol=protocol, interface=interface,
@@ -49,6 +51,10 @@ class RouterClient:
                                              interface=interface,
                                              port=broadcast_port,
                                              context=self._context)
+
+#        if self.version != self.server_version:
+#            self._log.warning("client and server versions do not match! Client: "
+#                             f"{self.version}, Server: {self.server_version}")
 
     def call(self, obj_name: str, attr_name: str, args: list = None,
              kwargs: dict = None,
@@ -154,6 +160,14 @@ class RouterClient:
         """
         return self.rpc_client.call("__streamer", "get_configuration",
                                     kwargs={"as_dict": as_dict})[1]
+
+    def version(self):
+        """Return client version."""
+        return local_version
+
+    def server_version(self):
+        """Return the server version."""
+        return self.rpc_client.call("__router_server", "version")[1]
 
     def close(self):
         """Close the connection to the :py:class:`~one_liner.server.RouterServer`."""

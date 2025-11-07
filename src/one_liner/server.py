@@ -1,6 +1,7 @@
 """Server for enabling remote control and broadcasting results of periodic function calls."""
 
 import zmq
+from one_liner import __version__ as local_version
 from one_liner.stream_server import ZMQStreamServer
 from one_liner.rpc_server import ZMQRPCServer
 from one_liner.utils import Protocol, Encoding
@@ -45,19 +46,20 @@ class RouterServer:
         # Pass streamer into RPC Server as another device so we can interact
         # with it remotely. Hide it with a "__" prefix.
         devices = {} if devices is None else devices
-        devices.update({"__streamer": self.streamer})
+        devices.update({"__streamer": self.streamer, "__router_server": self})
         self.rpc = ZMQRPCServer(protocol=protocol, interface=interface,
                                 port=rpc_port, context=self.context,
                                 devices=devices)
 
-    def run(self, run_in_thread: bool = True):
+    def run(self, block: bool = False):
         """Setup rpc listener and broadcaster.
 
-        :param run_in_thread: if ``True`` (default), run the underlying blocking
-           calls in a thread and return immediately.
+        :param block: if ``False`` (default), run the underlying blocking
+           calls in a thread and return immediately. Otherwise, run the streamer
+           in the current thread and block (i.e: do not return).
         """
         self.rpc.run()
-        self.streamer.run(run_in_thread=run_in_thread)
+        self.streamer.run(run_in_thread=(not block))
 
     def add_stream(self, name: str, frequency_hz: float, func: Callable,
                    args: list = None, kwargs: dict = None, enabled: bool = True,
@@ -169,6 +171,10 @@ class RouterServer:
 
         """
         self.streamer.remove(name)
+
+    def version(self):
+        """Get the server version."""
+        return local_version
 
     def close(self):
         """Close the RPC and Stream clients."""
