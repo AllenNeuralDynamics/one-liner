@@ -40,7 +40,7 @@ uv sync
 
 To install all optional dependencies to play with the examples, run:
 ```bash
-uv sync --extra examples
+uv sync --group examples
 ```
 
 
@@ -232,7 +232,7 @@ To install with supplementary dependencies for creating local docs, run:
 
 With uv:
 ```bash
-uv sync --extra docs
+uv sync --group docs
 ```
 with pip:
 ```bash

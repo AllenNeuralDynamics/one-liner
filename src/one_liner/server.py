@@ -1,10 +1,11 @@
 """Server for enabling remote control and broadcasting results of periodic function calls."""
 
 import zmq
+from one_liner import __version__ as local_version
 from one_liner.stream_server import ZMQStreamServer
 from one_liner.rpc_server import ZMQRPCServer
 from one_liner.utils import Protocol, Encoding
-from typing import Callable
+from typing import Any, Callable
 
 
 class RouterServer:
@@ -14,7 +15,7 @@ class RouterServer:
 
     def __init__(self,  protocol: Protocol = "tcp", interface: str = "*",
                  rpc_port: str = "5555", broadcast_port: str = "5556",
-                 context: zmq.Context = None, **devices):
+                 context: zmq.Context = None, devices: dict[str, Any] = None):
         """constructor.
 
         :param protocol: a zmq supported protocol (tcp, inproc, etc)
@@ -23,6 +24,7 @@ class RouterServer:
         :param broadcast_port: port from which to stream periodic data.
         :param context: the zmq context. Will be created automatically if
             unspecified.
+        :param devices: dict of object instances, keyed by name
 
         .. warning::
            For sharing data within the same process using the `inproc` protocol,
@@ -38,26 +40,30 @@ class RouterServer:
 
         """
         self.context = context or zmq.Context.instance()
-        self._context_managed_externally = context is None
+        self._context_managed_externally = context is not None
         self.streamer = ZMQStreamServer(protocol=protocol, interface=interface,
                                         port=broadcast_port, context=self.context)
         # Pass streamer into RPC Server as another device so we can interact
         # with it remotely. Hide it with a "__" prefix.
+        devices = {} if devices is None else devices
+        devices.update({"__streamer": self.streamer, "__router_server": self})
         self.rpc = ZMQRPCServer(protocol=protocol, interface=interface,
                                 port=rpc_port, context=self.context,
-                                __streamer=self.streamer, **devices)
+                                devices=devices)
 
-    def run(self, run_in_thread: bool = True):
+    def run(self, block: bool = False):
         """Setup rpc listener and broadcaster.
 
-        :param run_in_thread: if ``True`` (default), run the underlying blocking
-           calls in a thread and return immediately.
+        :param block: if ``False`` (default), run the underlying blocking
+           calls in a thread and return immediately. Otherwise, run the streamer
+           in the current thread and block (i.e: do not return).
         """
         self.rpc.run()
-        self.streamer.run(run_in_thread=run_in_thread)
+        self.streamer.run(run_in_thread=(not block))
 
     def add_stream(self, name: str, frequency_hz: float, func: Callable,
-                      *args, **kwargs):
+                   args: list = None, kwargs: dict = None, enabled: bool = True,
+                   serializer: Encoding | Callable = "pickle"):
         """Create a stream. i.e: Setup a function to be called with specific
         arguments at a set frequency. If the function is already being
         broadcasted, update the broadcast parameters.
@@ -65,8 +71,12 @@ class RouterServer:
         :param name: stream name
         :param frequency_hz: frequency at which to call the underlying function
         :param func: function to call
-        :param \\*args: any function arguments
-        :param \\*\\*kwargs: any function keyword arguments
+        :param args: any function arguments
+        :param kwargs: any function keyword arguments
+        :param enabled: if true (default), start with the stream enabled.
+        :param serializer: callable function to serialize the data or string
+            representation of built-in serializer (or None if the data is
+            already serialized)
 
         .. code-block:: python
 
@@ -83,7 +93,8 @@ class RouterServer:
                              get_frame) # func to call.
            server.run()
         """
-        self.streamer.add(name, frequency_hz, func, *args, **kwargs)
+        self.streamer.add(name, frequency_hz, func, args=args, kwargs=kwargs,
+                          enabled=enabled, serializer=serializer)
 
     def add_zmq_stream(self, name: str, address: str, enabled: True,
                        log_chatter: bool = False):
@@ -101,7 +112,7 @@ class RouterServer:
                                      log_chatter=log_chatter)
 
     def get_stream_fn(self, name: str, set_timestamp: bool = False,
-                      encoding: Encoding = "pickle"):
+                      serializer: Encoding | Callable = "pickle") -> Callable:
         """Get a function to broadcast the specified stream name.
         Useful if the application is creating data at its
         own rate and needs a callback function to call upon producing new data.
@@ -109,7 +120,8 @@ class RouterServer:
         This implicitly adds a manual stream to the configuration.
 
         :param name: stream name
-        :param encoding: `pickle` only for now.
+        :param serializer: callable function to serialize the data or string
+            representation of a built-in serializer.
         :param set_timestamp: if true, return a function who's first argument is
             the timestamp to be set for the packet.
 
@@ -124,7 +136,7 @@ class RouterServer:
                send_func(new_frame)
 
         """
-        return self.streamer.get_stream_fn(name, encoding=encoding,
+        return self.streamer.get_stream_fn(name, serializer=serializer,
                                            set_timestamp=set_timestamp)
 
     def enable_stream(self, name):
@@ -159,6 +171,10 @@ class RouterServer:
 
         """
         self.streamer.remove(name)
+
+    def version(self):
+        """Get the server version."""
+        return local_version
 
     def close(self):
         """Close the RPC and Stream clients."""

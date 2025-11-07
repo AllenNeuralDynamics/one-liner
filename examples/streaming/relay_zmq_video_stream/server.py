@@ -6,7 +6,7 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 
 
-VIDEO_SOURCE = 1 #0 #"/dev/video4"
+VIDEO_SOURCE = 0 #"/dev/video4"
 VIDEO_FEED_NAME = "live_video"
 
 

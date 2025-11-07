@@ -1,21 +1,20 @@
 [project]
 name = "one_liner"
-version = "0.1.0"
+version = "0.1.1.dev1"
 
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "orjson>=3.11.4",
     "pydantic>=2.11.7",
-    "pytest>=8.3.5",
     "pyzmq>=27.0.2",
-    "ruff>=0.9.9",
 ]
 
-[build-system]
-requires = ["uv_build>=0.8.22,<0.9.0"]
-build-backend = "uv_build"
-
-[project.optional-dependencies]
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+    "ruff>=0.9.9",
+]
 examples = [
     "ffmpeg-python>=0.2.0",
     "gr>=1.30.0",
@@ -32,6 +31,12 @@ docs = [
     'docutils'
 ]
 
+[build-system]
+requires = ["uv_build>=0.8.22,<0.9.0"]
+build-backend = "uv_build"
+
 [tool.pytest.ini_options]
 pythonpath = ["src", "tests"]
 
+[tool.ruff]
+line-length = 88

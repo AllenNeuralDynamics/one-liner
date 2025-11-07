@@ -3,6 +3,7 @@ import pickle
 import zmq
 from one_liner.utils import _send, Protocol
 from threading import Thread, Event
+from typing import Any
 
 
 class ZMQRPCServer:
@@ -12,7 +13,7 @@ class ZMQRPCServer:
 
     def __init__(self, protocol: Protocol = "tcp", interface: str = "*",
                  port: str = "5555", context: zmq.Context = None,
-                 **devices):
+                 devices: dict[str, Any] = None):
         self.log = logging.getLogger(self.__class__.__name__)
         self.port = port
         self.context = context or zmq.Context()
@@ -26,7 +27,7 @@ class ZMQRPCServer:
         self._keep_receiving = Event()
         self._keep_receiving.set()
         self._receive_thread: Thread = None
-        self.devices: dict[str, any] = devices
+        self.devices: dict[str, Any] = {} if devices is None else devices
 
     def run(self):
         """Launch thread to execute RPCs."""

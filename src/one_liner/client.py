@@ -4,11 +4,14 @@ import logging
 import pickle
 import zmq
 from one_liner.stream_schema import Streams
-from one_liner.utils import Protocol, RPCException, StreamException
-from typing import Any, Literal, Tuple
+from one_liner import __version__ as local_version
+from one_liner.utils import Protocol, Encoding, RPCException, StreamException, DESERIALIZERS, _recv
+from typing import Any, Callable, Literal, Tuple
 
 
 class RouterClient:
+
+    __slots__ = ("_log", "_context", "rpc_client", "stream_client")
 
     def __init__(self, protocol: Protocol = "tcp", interface: str = "localhost",
                  rpc_port: str = "5555", broadcast_port: str = "5556",
@@ -39,6 +42,7 @@ class RouterClient:
            `ipc` is for unix-like OSes only).
 
         """
+        self._log = logging.getLogger(self.__class__.__name__)
         self._context = context or zmq.Context.instance()
         # Share context between rpc and stream client
         self.rpc_client = ZMQRPCClient(protocol=protocol, interface=interface,
@@ -48,14 +52,18 @@ class RouterClient:
                                              port=broadcast_port,
                                              context=self._context)
 
-    def call(self, obj_name: str, attr_name: str, *args, **kwds) -> Tuple[float, Any]:
+    def call(self, obj_name: str, attr_name: str, args: list = None,
+             kwargs: dict = None,
+             deserializer: Encoding | Callable = "pickle") -> Tuple[float, Any]:
         """Call a function/method within the scope of the connected
         :py:class:`~one_liner.server.RouterServer` and return the result.
 
         :param obj_name: object name. (Class instance or module)
         :param attr_name: a callable attribute
-        :param \\*args:
-        :param \\*\\*kwargs:
+        :param deserializer: callable function to deserialize the data or
+            string-representation of one of the built-in options.
+        :param args: list of positional arguments for function call
+        :param kwargs: dict of keyword arguments for function call
         :raises RPCException: if the underlying function call raises an exception
 
         .. note::
@@ -63,10 +71,12 @@ class RouterClient:
            returned.
 
         """
-        return self.rpc_client.call(obj_name, attr_name, *args, **kwds)
+        return self.rpc_client.call(obj_name, attr_name, args, kwargs,
+                                    deserializer=deserializer)
 
     def configure_stream(self, name: str,
-                         storage_type: Literal["queue", "cache"] = "queue"):
+                         storage_type: Literal["queue", "cache"] = "queue",
+                         deserializer: Encoding | Callable = "pickle"):
         """Configure data received from a stream to either hold one the latest
         data (`cache`) or to hold onto all data in a buffer (`queue`) of
         size 1000.
@@ -78,9 +88,11 @@ class RouterClient:
            The ``"queue"`` option will buffer up to 1000 messages such that
            calling :func:`get_stream` will return data in a first-in-first-out
            (FIFO) manner.
+        :param deserializer: callable function to deserialize the data or
+            string-representation of one of the built-in options.
 
         """
-        self.stream_client.configure_stream(name, storage_type)
+        self.stream_client.configure_stream(name, storage_type, deserializer)
 
     def get_stream(self, name: str, block: bool = False) -> Tuple[float, Any]:
         """Receive the results of a configured stream as 2-tuple where the first
@@ -115,7 +127,7 @@ class RouterClient:
 
         """
         # Use rpc_client to enable/disable streams.
-        return self.rpc_client.call("__streamer", "enable", name)
+        return self.rpc_client.call("__streamer", "enable", args=[name])
 
     def disable_stream(self, name: str):
         """Disable broadcasting of a stream by name. The connected
@@ -133,7 +145,7 @@ class RouterClient:
 
         """
         # Use rpc_client to enable/disable streams.
-        return self.rpc_client.call("__streamer", "disable", name)
+        return self.rpc_client.call("__streamer", "disable", args=[name])
 
     def get_stream_configurations(self, as_dict: bool = False) -> Streams | dict:
         """Get the configuration for all streams.
@@ -142,7 +154,16 @@ class RouterClient:
            Otherwise, return a :py:class:`~one_liner.stream_schema.Streams`.
 
         """
-        return self.rpc_client.call("__streamer", "get_configuration", as_dict)[1]
+        return self.rpc_client.call("__streamer", "get_configuration",
+                                    kwargs={"as_dict": as_dict})[1]
+
+    def version(self):
+        """Return client version."""
+        return local_version
+
+    def server_version(self):
+        """Return the server version."""
+        return self.rpc_client.call("__router_server", "version")[1]
 
     def close(self):
         """Close the connection to the :py:class:`~one_liner.server.RouterServer`."""
@@ -152,6 +173,8 @@ class RouterClient:
 
 class ZMQRPCClient:
 
+    __slots__ = ("context", "socket")
+
     def __init__(self, protocol: Protocol = "tcp", interface: str = "localhost",
                  port: str = "5555", context: zmq.Context = None):
         self.context = context or zmq.Context()
@@ -159,15 +182,16 @@ class ZMQRPCClient:
         address = f"{protocol}://{interface}:{port}"
         self.socket.connect(address)
 
-    def call(self, obj_name: str, attr_name: str, *args, **kwargs) -> Tuple[float, Any]:
+    def call(self, obj_name: str, attr_name: str, args: list = None, kwargs: dict = None,
+             deserializer: Encoding | Callable = "pickle") -> Tuple[float, Any]:
         """Call a remote function available to the connected
         :py:class:`~one_liner.server.RouterServer` and return the result.
 
         """
+        args = [] if args is None else args
+        kwargs = {} if kwargs is None else kwargs
         self.socket.send(pickle.dumps((obj_name, attr_name, args, kwargs)), copy=False)
-        # TODO: should unpacking data be encoding-specific for RPCs?
-        #   We would need to get this from a request for a schema a-priori.
-        success, timestamp, data = pickle.loads(self.socket.recv())
+        success, timestamp, data = _recv(self.socket, deserializer=deserializer)
         if not success:
             raise RPCException(data)
         return timestamp, data
@@ -179,6 +203,7 @@ class ZMQRPCClient:
 class ZMQStreamClient:
     """Connect to an instrument server (likely running on an actual instrument)
     and receive periodically broadcasted function call results."""
+    __slots__ = ("log", "context", "address", "sub_sockets", "deserializers")
 
     def __init__(self, protocol: Protocol = "tcp", interface: str = "localhost",
                  port: str = "5556", context: zmq.Context = None):
@@ -188,15 +213,18 @@ class ZMQStreamClient:
         self.log = logging.getLogger(self.__class__.__name__)
         self.context = context or zmq.Context()
         self.address = f"{protocol}://{interface}:{port}"
-        self.sub_sockets = {}
+        self.sub_sockets: dict[str, zmq.Context.socket] = {}
+        self.deserializers: dict[str, Encoding | Callable] = {}
 
     def configure_stream(self, name: str,
-                         storage_type: Literal["queue", "cache"] = "queue"):
+                         storage_type: Literal["queue", "cache"] = "queue",
+                         deserializer: Encoding | Callable = "pickle"):
         """Create a subscriber socket to receive a specific topic and setup
         how to buffer data.
         * queue -> FIFO.
         * cache -> only the latest data is received.
         """
+        self.deserializers[name] = deserializer
         # Create zmq socket and configure to either queue or get-the-latest data.
         socket = self.context.socket(zmq.SUB)
         self.log.debug(f"Creating socket for {name} stream and subscribing to topic: {name}.")
@@ -216,10 +244,10 @@ class ZMQStreamClient:
         :raises StreamException: if the underlying function raised an exception
            while being executed.
         """
-        flags = 0 if block else zmq.NOBLOCK
-        pickled_data = self.sub_sockets[stream_name].recv(flags=flags)
-        offset = len(stream_name)
-        success, timestamp, data = pickle.loads(pickled_data[offset:])  # Strip off topic prefix.
+        flag = 0 if block else zmq.NOBLOCK
+        success, timestamp, data = _recv(self.sub_sockets[stream_name], flag=flag,
+                                         prefix=stream_name,
+                                         deserializer=self.deserializers[stream_name])
         if not success:
             raise StreamException(str(data))
         return timestamp, data
