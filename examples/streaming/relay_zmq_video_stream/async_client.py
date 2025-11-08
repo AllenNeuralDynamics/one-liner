@@ -11,9 +11,9 @@ if __name__ == "__main__":
     client = RouterClient()
     client.configure_stream(VIDEO_FEED_NAME, storage_type="cache")
 
-    # Get an initial image to figure out the size:
     async def display_images():
         fig, ax = plt.subplots()
+        # Get an initial image to figure out the size:
         _, frame = await client.get_stream(VIDEO_FEED_NAME)
         im = ax.imshow(frame)
         plt.show(block=False)
