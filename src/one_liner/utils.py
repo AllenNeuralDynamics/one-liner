@@ -2,6 +2,7 @@ import orjson
 import struct
 import pickle
 import zmq
+import zmq.asyncio
 from time import perf_counter as now
 from typing import Any, Literal, Callable, Tuple
 
@@ -73,6 +74,27 @@ def _recv(socket: zmq.Context.socket, flag: zmq.Flag = 0, prefix: str | None = N
        a bytes-like object. Default is `"pickle"`.
     """
     raw_bytes = socket.recv(copy=False, flags=flag).buffer  # Get a view; don't copy yet.
+    prefix_len = 0 if prefix is None else len(prefix)
+    # Upack metadata first with pickle.
+    metadata_num_bytes = struct.unpack("<H", raw_bytes[prefix_len:prefix_len + 2])[0]
+    success, timestamp = pickle.loads(raw_bytes[prefix_len + 2:])
+    # Unpack payload with deserializer of choice.
+    deserialize = DESERIALIZERS.get(deserializer, deserializer)
+    data = deserialize(raw_bytes[prefix_len + 2 + metadata_num_bytes:])
+    return success, timestamp, data
+
+
+async def _async_recv(socket: zmq.asyncio.Context.socket, prefix: str | None = None,
+                deserializer: Encoding | Callable = "pickle") -> Tuple[bool, float, Any]:
+    """Receive data from an asynchronous zmq socket and deserialize it.
+
+    :param flag: additional zmq flag to pass to the socket
+    :param deserializer: the encoding option to decode the data, `None`
+       if the data is `bytes`-like, or a user-supplied function to deserialize
+       a bytes-like object. Default is `"pickle"`.
+    """
+    frame = await socket.recv(copy=False) # don't copy yet.
+    raw_bytes = frame.buffer  # Get a view
     prefix_len = 0 if prefix is None else len(prefix)
     # Upack metadata first with pickle.
     metadata_num_bytes = struct.unpack("<H", raw_bytes[prefix_len:prefix_len + 2])[0]

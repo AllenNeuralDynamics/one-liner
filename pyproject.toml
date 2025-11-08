@@ -8,6 +8,7 @@ dependencies = [
     "orjson>=3.11.4",
     "pydantic>=2.11.7",
     "pyzmq>=27.0.2",
+    "tornado>=6.5.2",
 ]
 
 [dependency-groups]
