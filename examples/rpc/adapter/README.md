@@ -5,6 +5,11 @@
 
 This example shows a pattern that can be used to decouple generic code (e.g. for running an instrument) from infrastructure-specific code (e.g. querying external databases).
 
+## Usage
+Run the example with `uv run examples/rpc/adapter/instrument.py`, it'll start the adapter automatically in a subprocess.
+
+## Description
+
 The Instrument code defines a [Protocol](https://typing.python.org/en/latest/spec/protocol.html) and models that it will use to communicate, then uses the `get_connector` utility method to set up an RPC client to broadcast the function calls over zmq.
 
 In a separate application, an Adapter is written that imports the API from the main instrument and implements the specific logic to carry out the desired functions. It runs a RPC server that connects to the instrument.
