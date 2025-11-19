@@ -209,6 +209,7 @@ class ZMQStreamServer:
             """Capture data from the relayed zmq stream and log it (unless it
             is "large"). Useful for diagnosing issues."""
             cap_sub_socket = self._context.socket(zmq.SUB)
+            cap_sub_socket.setsockopt(zmq.LINGER, 0)
             cap_sub_socket.subscribe("")
             cap_sub_socket.connect(capture_socket_address)
             while True:
