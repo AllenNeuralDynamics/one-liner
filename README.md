@@ -75,7 +75,7 @@ class Horn:
   
 my_horn = Horn()
 
-server = RouterServer(devices={"my_horn": my_horn})
+server = RouterServer(instances={"my_horn": my_horn})
 server.run()
 
 while True: # Nothing to do! Object control happens in another thread.

@@ -46,7 +46,7 @@ class InfrastructureAdapter(InstrumentInfrastructureAPI):
 if __name__ == "__main__":
     port = sys.argv[1] if len(sys.argv) > 1 else "5555"
     adapter = InfrastructureAdapter()
-    server = RouterServer(devices={adapter.api_name: adapter}, rpc_port=port)
+    server = RouterServer(instances={adapter.api_name: adapter}, rpc_port=port)
     server.run()
     try:
         import time
