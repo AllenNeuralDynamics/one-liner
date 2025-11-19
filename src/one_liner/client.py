@@ -185,7 +185,7 @@ class RouterClient:
 
         """
         return self.rpc_client.call("__streamer", "get_configuration",
-                                    kwargs={"as_dict": as_dict})[1]
+                                    kwargs={"as_dict": as_dict})
 
     @property
     def version(self):
