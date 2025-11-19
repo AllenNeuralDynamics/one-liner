@@ -18,8 +18,9 @@ class ZMQRPCServer:
                  instances: dict[str, Any] = None):
         self.log = logging.getLogger(self.__class__.__name__)
         self.port = port
-        self.context = context or zmq.Context()
-        self.context_managed_externally = context is not None
+        self.context = context or zmq.Context.instance()
+        self._context_managed_externally = ((context is not None) or
+                                            (self.context is zmq.Context.instance()))
         self.socket = self.context.socket(zmq.REP)
         self.socket.setsockopt(zmq.RCVTIMEO, 100)  # timeout for recv() in [ms].
                                                    # >0 but value is kinda arbitrary.
@@ -52,8 +53,6 @@ class ZMQRPCServer:
                 continue
             request = pickle.loads(pickled_request)
             obj_name, attr_name, args, kwargs, get_timestamp = request
-            print(f"unpacking: obj_name={obj_name}, attr_name={attr_name}, "
-                  f"args={args}, kwargs={kwargs}, get_timestamp={get_timestamp}")
             try:
                 reply = self._call(obj_name=obj_name, attr_name=attr_name,
                                    args=args, kwargs=kwargs)
@@ -148,5 +147,5 @@ class ZMQRPCServer:
         self._keep_receiving.clear()
         self._receive_thread.join()
         self.socket.close()
-        if not self.context_managed_externally:
+        if not self._context_managed_externally:
             self.context.term()

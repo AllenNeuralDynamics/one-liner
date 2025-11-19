@@ -187,13 +187,15 @@ class RouterClient:
         return self.rpc_client.call("__streamer", "get_configuration",
                                     kwargs={"as_dict": as_dict})[1]
 
+    @property
     def version(self):
         """Return client version."""
         return local_version
 
+    @property
     def server_version(self):
         """Return the server version."""
-        return self.rpc_client.call("__router_server", "version")[1]
+        return self.rpc_client.call("__router_server", "get_version")
 
     def close(self):
         """Close the connection to the :py:class:`~one_liner.server.RouterServer`."""
