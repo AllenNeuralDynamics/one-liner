@@ -52,18 +52,47 @@ class RouterClient:
                                              port=broadcast_port,
                                              context=self._context)
 
+    def call_by_name(self, call_name: str, args: list = None, kwargs: dict = None,
+                     get_timestamp: bool = False,
+                     deserializer: Encoding | Callable = "pickle") \
+            -> Any | Tuple[float, Any]:
+        """Lookup a configured call by its `'call_name'`, call it with the
+        specified args/kwargs, and return the result.
+
+        :pararm call_name: the name of the call specified in
+            :py:meth:`~one_liner.server.ZMQRPCServer.add_named_call`.
+        :param args: args to pass to the underlying function. Note that any arg
+            passed in will overwrite any existing pre-configured arg setup in
+            :py:meth:`~one_liner.server.ZMQRPCServer.add_named_call`.
+        :param kwargs: kwargs to pass to the underlying function. Note that
+            these kwargs will overwrite existing pre-configured args setup with
+            :py:meth:`~one_liner.server.ZMQRPCServer.add_named_call` via
+            a standard dict update.
+        :param get_timestamp: if specified, return the data as a tuple
+            where the first value is a server-specified timestamp.
+        :param deserializer: callable function to deserialize the data or
+            string-representation of one of the built-in options.
+
+        """
+        return self.rpc_client.call_by_name(call_name=call_name, args=args,
+                                            get_timestamp=get_timestamp,
+                                            kwargs=kwargs, deserializer=deserializer)
+
     def call(self, obj_name: str, attr_name: str, args: list = None,
-             kwargs: dict = None,
-             deserializer: Encoding | Callable = "pickle") -> Tuple[float, Any]:
+             kwargs: dict = None, get_timestamp: bool = False,
+             deserializer: Encoding | Callable = "pickle") \
+            -> Any | Tuple[float, Any]:
         """Call a function/method within the scope of the connected
         :py:class:`~one_liner.server.RouterServer` and return the result.
 
         :param obj_name: object name. (Class instance or module)
         :param attr_name: a callable attribute
-        :param deserializer: callable function to deserialize the data or
-            string-representation of one of the built-in options.
         :param args: list of positional arguments for function call
         :param kwargs: dict of keyword arguments for function call
+        :param get_timestamp: if specified, return the data as a tuple
+            where the first value is a server-specified timestamp.
+        :param deserializer: callable function to deserialize the data or
+            string-representation of one of the built-in options.
         :raises RPCException: if the underlying function call raises an exception
 
         .. note::
@@ -72,6 +101,7 @@ class RouterClient:
 
         """
         return self.rpc_client.call(obj_name, attr_name, args, kwargs,
+                                    get_timestamp=get_timestamp,
                                     deserializer=deserializer)
 
     def configure_stream(self, name: str,
@@ -155,15 +185,17 @@ class RouterClient:
 
         """
         return self.rpc_client.call("__streamer", "get_configuration",
-                                    kwargs={"as_dict": as_dict})[1]
+                                    kwargs={"as_dict": as_dict})
 
+    @property
     def version(self):
         """Return client version."""
         return local_version
 
+    @property
     def server_version(self):
         """Return the server version."""
-        return self.rpc_client.call("__router_server", "version")[1]
+        return self.rpc_client.call("__router_server", "get_version")
 
     def close(self):
         """Close the connection to the :py:class:`~one_liner.server.RouterServer`."""
@@ -182,19 +214,34 @@ class ZMQRPCClient:
         address = f"{protocol}://{interface}:{port}"
         self.socket.connect(address)
 
-    def call(self, obj_name: str, attr_name: str, args: list = None, kwargs: dict = None,
-             deserializer: Encoding | Callable = "pickle") -> Tuple[float, Any]:
+    def call_by_name(self, call_name: str, args: list = None, kwargs: dict = None,
+                     get_timestamp: bool = False,
+                     deserializer: Encoding | Callable = "pickle") \
+            -> Any | Tuple[float, Any]:
+        return self.call("__rpc_server", "_call_by_name",
+                         args=[call_name], kwargs={"args": args, "kwargs": kwargs},
+                         get_timestamp=get_timestamp, deserializer=deserializer)
+
+    def call(self, obj_name: str, attr_name: str, args: list = None,
+             kwargs: dict = None, get_timestamp: bool = False,
+             deserializer: Encoding | Callable = "pickle") \
+        -> Any | Tuple[float, Any]:
         """Call a remote function available to the connected
         :py:class:`~one_liner.server.RouterServer` and return the result.
 
         """
         args = [] if args is None else args
         kwargs = {} if kwargs is None else kwargs
-        self.socket.send(pickle.dumps((obj_name, attr_name, args, kwargs)), copy=False)
-        success, timestamp, data = _recv(self.socket, deserializer=deserializer)
+        pickled_req = pickle.dumps((obj_name, attr_name, args, kwargs,
+                                    get_timestamp))
+        self.socket.send(pickled_req, copy=False)
+        success, *reply = _recv(self.socket, has_timestamp=get_timestamp,
+                               deserializer=deserializer)
         if not success:
-            raise RPCException(data)
-        return timestamp, data
+            raise RPCException(reply[-1]) # data contains exception string.
+        if get_timestamp:
+            return reply # (timestamp, data)
+        return reply[-1] # data
 
     def close(self):
         self.socket.close()

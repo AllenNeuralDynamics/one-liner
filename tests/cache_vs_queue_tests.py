@@ -42,39 +42,40 @@ def test_caching_option():
                     # system thread switch interval.
     RECV_INTERVAL = 1/RECV_RATE
 
-    # Broadcast a method at 100 Hz.
-    server.add_stream("measurement", SEND_RATE, sensors.get_data, args=[sensor_index])
-    server.run()
-
-    # Configure which topic to receive and how to store the data.
-    client.configure_stream("measurement", storage_type="cache")
-    start_time = now()
-
-    # Read messages slower than we send them.
-    # Ensure we are getting the latest data.
-    # Check adjacent timestamps to make sure they are similar to RECV_RATE
-    old_tstamp = now()
-    packet_deltas = []
-    while ((now() - start_time) < 0.2):
-        # Read messages at a slower rate than the publisher is publishing them.
-        sleep(RECV_INTERVAL)
-        try:
-            new_tstamp, new_data = client.get_stream("measurement")
-            interpacket_delta_t = abs(new_tstamp - old_tstamp)
-            packet_deltas.append(interpacket_delta_t)
-            print(f"time: {new_tstamp:.3f} | data: {new_data} | delta: {interpacket_delta_t:.3f}")
-            old_tstamp = new_tstamp
-        except zmq.Again:
-            pass
-    average_recv_interval = sum(packet_deltas)/len(packet_deltas)
-    print(f"average packet_delta: {average_recv_interval}")
-    # average receive interval should be close to nominal receive interval and
-    # *not* close to our send interval, which is faster.
     try:
+        # Broadcast a method at 100 Hz.
+        server.add_stream("measurement", SEND_RATE, sensors.get_data, args=[sensor_index])
+        server.run()
+
+        # Configure which topic to receive and how to store the data.
+        client.configure_stream("measurement", storage_type="cache")
+        start_time = now()
+
+        # Read messages slower than we send them.
+        # Ensure we are getting the latest data.
+        # Check adjacent timestamps to make sure they are similar to RECV_RATE
+        old_tstamp = now()
+        packet_deltas = []
+        while ((now() - start_time) < 0.2):
+            # Read messages at a slower rate than the publisher is publishing them.
+            sleep(RECV_INTERVAL)
+            try:
+                new_tstamp, new_data = client.get_stream("measurement")
+                interpacket_delta_t = abs(new_tstamp - old_tstamp)
+                packet_deltas.append(interpacket_delta_t)
+                print(f"time: {new_tstamp:.3f} | data: {new_data} | delta: {interpacket_delta_t:.3f}")
+                old_tstamp = new_tstamp
+            except zmq.Again:
+                pass
+        average_recv_interval = sum(packet_deltas)/len(packet_deltas)
+        print(f"average packet_delta: {average_recv_interval}")
+        # average receive interval should be close to nominal receive interval and
+        # *not* close to our send interval, which is faster.
         assert abs(average_recv_interval - RECV_INTERVAL) < RECV_INTERVAL * 0.1
     finally:
-        client.close()
         server.close()
+        client.close()
+        zmq.Context.instance().destroy() # We shouldn't have to do this.
 
 
 def test_get_last_sent_value():
@@ -111,3 +112,4 @@ def test_get_last_sent_value():
     finally:
         client.close()
         server.close()
+        zmq.Context.instance().destroy()

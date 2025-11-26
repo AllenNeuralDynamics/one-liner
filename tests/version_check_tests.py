@@ -12,9 +12,7 @@ def test_client_receive():
     client = RouterClient()
     server.run()
     try:
-        client_version = client.version()
-        server_version = client.server_version()
-        assert len({client_version, server_version, one_liner_version}) == 1
+        assert len({client.version, server.version, client.server_version}) == 1
     finally:
         server.close()
         client.close()

@@ -13,9 +13,9 @@ class RouterServer:
     """Interface for enabling remote control/monitoring of one or more object
        instances. Heavy lifting is delegated to two subordinate objects."""
 
-    def __init__(self,  protocol: Protocol = "tcp", interface: str = "*",
+    def __init__(self, protocol: Protocol = "tcp", interface: str = "*",
                  rpc_port: str = "5555", broadcast_port: str = "5556",
-                 context: zmq.Context = None, devices: dict[str, Any] = None):
+                 context: zmq.Context = None, instances: dict[str, Any] = None):
         """constructor.
 
         :param protocol: a zmq supported protocol (tcp, inproc, etc)
@@ -24,7 +24,7 @@ class RouterServer:
         :param broadcast_port: port from which to stream periodic data.
         :param context: the zmq context. Will be created automatically if
             unspecified.
-        :param devices: dict of object instances, keyed by name
+        :param instances: dict of object instances, keyed by name
 
         .. warning::
            For sharing data within the same process using the `inproc` protocol,
@@ -40,16 +40,17 @@ class RouterServer:
 
         """
         self.context = context or zmq.Context.instance()
-        self._context_managed_externally = context is not None
+        self._context_managed_externally = ((context is not None) or
+                                            (self.context is zmq.Context.instance()))
         self.streamer = ZMQStreamServer(protocol=protocol, interface=interface,
                                         port=broadcast_port, context=self.context)
         # Pass streamer into RPC Server as another device so we can interact
         # with it remotely. Hide it with a "__" prefix.
-        devices = {} if devices is None else devices
-        devices.update({"__streamer": self.streamer, "__router_server": self})
+        instances = {} if instances is None else instances
+        instances.update({"__streamer": self.streamer, "__router_server": self})
         self.rpc = ZMQRPCServer(protocol=protocol, interface=interface,
                                 port=rpc_port, context=self.context,
-                                devices=devices)
+                                instances=instances)
 
     def run(self, block: bool = False):
         """Setup rpc listener and broadcaster.
@@ -60,6 +61,28 @@ class RouterServer:
         """
         self.rpc.run()
         self.streamer.run(run_in_thread=(not block))
+
+    def add_named_call(self, call_name: str, obj_name: str, attr_name: str,
+                             args: list = None, kwargs: dict = None):
+        """Setup a call to be called with `call_by_name` on the
+        :py:class:`~one_lner.client.ZMQRPCClient`
+
+        :param call_name: string to save the function call signature under.
+        :param obj_name: underlying object instance name. Must be present in
+            the `objects` dict passed into the `__init__`.
+        :param attr_name: name of the callable attribute (method).
+        :param args: default args to save with the function call.
+        :param kwargs: default kwargs to save with the function call.
+
+        .. note::
+           `args` and `kwargs` can be overwritten by index or name respectively
+           when actually calling the named function call with
+           :py:meth:`~one_liner.server.rpc_server.ZMQRPCServer.call_by_name.`
+
+        """
+        return self.rpc.add_named_call(call_name=call_name, obj_name=obj_name,
+                                       attr_name=attr_name, args=args,
+                                       kwargs=kwargs)
 
     def add_stream(self, name: str, frequency_hz: float, func: Callable,
                    args: list = None, kwargs: dict = None, enabled: bool = True,
@@ -172,7 +195,12 @@ class RouterServer:
         """
         self.streamer.remove(name)
 
+    @property
     def version(self):
+        """Get the server version."""
+        return local_version
+
+    def get_version(self):
         """Get the server version."""
         return local_version
 
