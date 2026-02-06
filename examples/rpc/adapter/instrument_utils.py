@@ -31,7 +31,7 @@ def get_connector(
     api_funcs = protocol.__protocol_attrs__
 
     def call_remote(funcname: str, *args, **kwargs):
-        return client.call(target_obj_name, funcname, args, kwargs)[1]
+        return client.call(target_obj_name, funcname, args, kwargs)
 
     # dynamically create a new class that implements the protocol
     connector = type(

@@ -220,6 +220,16 @@ This is done with a zmq proxy.
 
 By relaying data from a completely separate zmq socket, it is possible to cascade `RouterServer`s.
 
+### Interfacing with external ZMQ Sockets
+It should be possible to interface one-liner with other packages communicating with ZMQ with some knowledge about the underlying implementation details.
+
+Both (1) the `name`s of streams and (2) the `obj_name`s of a remote procedure call are represented as ZMQ topics.
+While these topic names are represented as strings from the user side, they are converted to **null-terimated strings** under the hood before sending and receiving them.
+Doing so prevents topic collisions.
+
+> Example: topics `new_frame` and `new_frame_2`. When the data from topic `new_frame` starts with `_2`, that data would be erroneously routed to topic `new_frame_2`.
+> To prevent this situation, all topics are represented as null-terminated strings.
+
 ## Package/Project Management
 
 This project utilizes [uv](https://docs.astral.sh/uv/) to handle installing dependencies as well as setting up environments for this project. It replaces tool like pip, poetry, virtualenv, and conda.

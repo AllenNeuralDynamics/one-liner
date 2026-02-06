@@ -8,6 +8,8 @@ from typing import Any, Literal, Callable, Tuple
 Protocol = Literal["tcp", "inproc", "ipc", "ws", "wss"]
 Encoding = Literal[None, "pickle", "json", "unspecified"]
 
+TOPIC_SUFFIX = b"\x00" # null-termination character
+
 
 SERIALIZERS: dict[Encoding, Callable] = \
     {
@@ -58,7 +60,7 @@ def _send(socket: zmq.Context.socket, name: str, data: bytes | Any,
     metadata_bytes = pickle.dumps(metadata)
     metadata_num_bytes = len(metadata_bytes)
     serialize = SERIALIZERS.get(serializer, serializer)
-    packet = name.encode("utf-8") + \
+    packet = name.encode("utf-8") + TOPIC_SUFFIX + \
              struct.pack("<H", metadata_num_bytes) + metadata_bytes + \
              serialize(data)
     # Set copy=False since we have a pickled representation of the data.
@@ -80,7 +82,7 @@ def _recv(socket: zmq.Context.socket, flag: zmq.Flag = 0, prefix: str | None = N
     # Unpack payload with deserializer of choice.
     deserialize_fn = DESERIALIZERS.get(deserializer, deserializer)
     raw_bytes = socket.recv(copy=False, flags=flag).buffer  # Get a view; don't copy yet.
-    prefix_len = 0 if prefix is None else len(prefix)
+    prefix_len = len(TOPIC_SUFFIX) if prefix is None else len(prefix) + len(TOPIC_SUFFIX)
     # Upack metadata first with pickle.
     metadata_num_bytes = struct.unpack("<H", raw_bytes[prefix_len:prefix_len + 2])[0]
     # Unpack the timestamp if we know it came with the data.
