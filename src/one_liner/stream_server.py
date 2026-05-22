@@ -148,7 +148,7 @@ class ZMQStreamServer:
         msg = f"Creating send function for stream {name} with {tstamp_option} timestamp."
         self.log.debug(msg)
         if set_timestamp:
-            return lambda data, timestamp, s=socket, n=name, success=True, e=serializer: \
+            return lambda timestamp, data, s=socket, n=name, success=True, e=serializer: \
                 _send(s, n, data, timestamp=timestamp, success=success, serializer=e)
         return lambda data, s=socket, n=name, success=True, e=serializer: \
             _send(s, n, data, success=success, serializer=e)

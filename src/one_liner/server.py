@@ -9,13 +9,15 @@ from typing import Any, Callable
 
 
 class RouterServer:
-    __slots__ = ("context", "streamer", "rpc", "_context_managed_externally")
+    __slots__ = ("instances", "context", "streamer", "rpc",
+                 "_context_managed_externally")
     """Interface for enabling remote control/monitoring of one or more object
        instances. Heavy lifting is delegated to two subordinate objects."""
 
     def __init__(self, protocol: Protocol = "tcp", interface: str = "*",
                  rpc_port: str = "5555", broadcast_port: str = "5556",
-                 context: zmq.Context = None, instances: dict[str, Any] = None):
+                 context: zmq.Context = None, instances: dict[str, Any] = None,
+                 config: dict[str, dict] = None):
         """constructor.
 
         :param protocol: a zmq supported protocol (tcp, inproc, etc)
@@ -46,11 +48,19 @@ class RouterServer:
                                         port=broadcast_port, context=self.context)
         # Pass streamer into RPC Server as another device so we can interact
         # with it remotely. Hide it with a "__" prefix.
-        instances = {} if instances is None else instances
-        instances.update({"__streamer": self.streamer, "__router_server": self})
+        self.instances = {} if instances is None else instances
+        self.instances.update({"__streamer": self.streamer,
+                               "__router_server": self})
         self.rpc = ZMQRPCServer(protocol=protocol, interface=interface,
                                 port=rpc_port, context=self.context,
-                                instances=instances)
+                                instances=self.instances)
+        if not config:
+            return
+        # Construct any streams or named calls from config spec.
+        for name, specs in config.get("periodic_streams", {}).items():
+            self.add_stream(stream_name=name, **specs)
+        for name, specs in config.get("named_calls", {}).items():
+            self.add_named_call(call_name=name, **specs)
 
     def run(self, block: bool = False):
         """Setup rpc listener and broadcaster.
@@ -84,8 +94,31 @@ class RouterServer:
                                        attr_name=attr_name, args=args,
                                        kwargs=kwargs)
 
-    def add_stream(self, name: str, frequency_hz: float, func: Callable,
-                   args: list = None, kwargs: dict = None, enabled: bool = True,
+    def add_stream(self, stream_name: str, frequency_hz: float, obj_name: str,
+                   attr_name: str, args: list = None, kwargs: dict = None,
+                   enabled: bool = True, serializer: Encoding | Callable = "pickle"):
+        """Create a stream from a callable object attribute in the instance dict.
+
+        :param name: stream name
+        :param frequency_hz: frequency at which to call the underlying function
+        :param obj_name: name of instance in the instances dict
+        :param attr_name: name of callable instance attribute (a method)
+        :param args: any function arguments
+        :param kwargs: any function keyword arguments
+        :param enabled: if true (default), start with the stream enabled.
+        :param serializer: callable function to serialize the data or string
+            representation of built-in serializer (or None if the data is
+            already serialized)
+        """
+        func = getattr(self.rpc.instances[obj_name], attr_name)
+        self.streamer.add(name=stream_name, frequency_hz=frequency_hz,
+                          func=func, args=args, kwargs=kwargs,
+                          enabled=enabled, serializer=serializer)
+
+
+    def add_stream_from_callable(self, stream_name: str, frequency_hz: float,
+                   func: Callable, args: list = None, kwargs: dict = None,
+                   enabled: bool = True,
                    serializer: Encoding | Callable = "pickle"):
         """Create a stream. i.e: Setup a function to be called with specific
         arguments at a set frequency. If the function is already being
@@ -116,7 +149,8 @@ class RouterServer:
                              get_frame) # func to call.
            server.run()
         """
-        self.streamer.add(name, frequency_hz, func, args=args, kwargs=kwargs,
+        self.streamer.add(name=stream_name, frequency_hz=frequency_hz,
+                          func=func, args=args, kwargs=kwargs,
                           enabled=enabled, serializer=serializer)
 
     def add_zmq_stream(self, name: str, address: str, enabled: True,

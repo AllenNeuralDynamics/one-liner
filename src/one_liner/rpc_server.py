@@ -83,6 +83,11 @@ class ZMQRPCServer:
         """
         args = [] if args is None else args
         kwargs = {} if kwargs is None else kwargs
+        self.log.debug(f"Adding named call: {call_name} = "
+                       f"{obj_name}.{attr_name}("
+                       f"{', '.join([str(a) for a in args])}"
+                       f"{', ' if (len(args) and len(kwargs)) else ''}"
+                       f"{', '.join([str(k)+'='+str(v) for k,v in kwargs.items()])})")
         self.named_call_signatures[call_name] = (obj_name, attr_name, args, kwargs)
 
     def _call_by_name(self, call_name: str, args: list = None,

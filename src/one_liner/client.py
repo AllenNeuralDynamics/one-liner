@@ -292,14 +292,13 @@ class ZMQStreamClient:
            while being executed.
         """
         flag = 0 if block else zmq.NOBLOCK
-        success, timestamp, data = _recv(self.sub_sockets[stream_name], flag=flag,
+        success, timestamp, *data = _recv(self.sub_sockets[stream_name], flag=flag,
                                          prefix=stream_name,
                                          deserializer=self.deserializers[stream_name])
         if not success:
             raise StreamException(str(data))
-        return timestamp, data
+        return timestamp, *data
 
     def close(self):
         for name, socket in self.sub_sockets.items():
             socket.close()
-
