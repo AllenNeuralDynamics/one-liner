@@ -93,7 +93,7 @@ result = client.call("my_horn", "beep") # call a func/method w/ args & kwargs; r
 ### Streaming Data
 There are three ways to stream data from a `RouterServer` to one or more `RouterClient` objects.
 
-#### Periodic Broadcasting
+#### Periodic Streaming
 In the PC acting as the server:
 ```python
 from one_liner.server import RouterServer
@@ -132,8 +132,8 @@ while True:
 That's it!
 
 
-#### Application-Controlled
-Instead of having `RouterServer` periodically call a function in a thread, it's also possible to have your native application send data.
+#### Application-Controlled Streaming
+Instead of having `RouterServer` periodically call a function in a thread, it's also possible to have your native application send data via a handler function.
 
 In the PC acting as the server:
 ```python
@@ -143,7 +143,7 @@ import cv2
 video = cv2.VideoCapture(0) # Get the first available camera.
 
 server = RouterServer()
-send_frame = server.get_broadcast_fn("live_video")
+send_frame = server.get_broadcast_fn("live_video") # Create the handler function.
 server.run()  # don't block.
 
 while True:
