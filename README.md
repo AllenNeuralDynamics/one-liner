@@ -105,9 +105,9 @@ def get_frame():
   return video.read()[1] # just get the frame.
 
 server = RouterServer()
-server.add_stream("live_video", # name of the stream
-                  30,  # How fast to call this function.
-                  get_frame) # func to call (no *args or **kwargs in this case).
+server.add_stream_from_callable("live_video", # name of the stream
+                                30,  # How fast to call this function.
+                                get_frame) # function to call.
 server.run(run_in_thread=False)  # block, but we can not-block if set to True. That's it!
 ```
 
@@ -154,7 +154,7 @@ In the PC acting as the client--there are no changes!
 It's just the same example client code as before.
 
 #### from another zmq socket
-**TODO**: see the examples folder for now.
+**TODO**: see the **relay_zmq_video_stream** example folder for now.
 
 ### Handling Received Data
 
@@ -176,6 +176,35 @@ client.enable_stream("live_video")  # the connected Router will not send this st
 # ...
 client.disable_stream("live_video")  # the connected Router will send the stream
 ```
+
+### Init from Config
+
+It's possible to drive the creation of remote function calls and streams from a config dictionary provided that the object instance also exists in the instance dict.
+
+Recall that, to create a `RouterServer`, we can optionally pass in a dictionary of object instances.
+Now we additionally pass in a config.
+
+```python
+config = {
+    "named_calls":
+    {
+        "set_axis_position":
+            {
+              "obj_name": "my_horn",
+              "attr_name": "beep",
+              "args": [],   # If args are empty, we can also omit this field.
+              "kwargs": {}, # If kwargs are empty, we can also omit this field.
+            }
+    },
+    "periodic_streams": {}
+}
+
+server = RouterServer(instances={"my_horn": my_horn}, config=config)
+server.run()
+```
+
+Now, just like before, a connected client can `client.call("my_horn", "beep")` like before.
+
 
 ## Implementation Details
 
