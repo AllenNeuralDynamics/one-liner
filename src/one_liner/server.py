@@ -243,5 +243,4 @@ class RouterServer:
         self.rpc.close()
         self.streamer.close()
         if not self._context_managed_externally:
-            # TODO: figure out why zmq proxy needs destroy instead of just term.
-            self.context.destroy()
+            self.context.term()

@@ -211,6 +211,7 @@ class ZMQRPCClient:
                  port: str = "5555", context: zmq.Context = None):
         self.context = context or zmq.Context()
         self.socket = self.context.socket(zmq.REQ)
+        self.socket.setsockopt(zmq.LINGER, 0)
         address = f"{protocol}://{interface}:{port}"
         self.socket.connect(address)
 
@@ -274,6 +275,7 @@ class ZMQStreamClient:
         self.deserializers[name] = deserializer
         # Create zmq socket and configure to either queue or get-the-latest data.
         socket = self.context.socket(zmq.SUB)
+        socket.setsockopt(zmq.LINGER, 0)
         self.log.debug(f"Creating socket for {name} stream and subscribing to topic: {name}.")
         socket.subscribe(name)
         if storage_type == "cache":

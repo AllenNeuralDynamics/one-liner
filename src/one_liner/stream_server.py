@@ -12,12 +12,14 @@ class ZMQStreamServer:
        at a specified frequency."""
     __slots__ = ("log", "port", "_context_managed_externally", "_worker_url",
                  "_context", "_xsub_socket", "_xpub_socket",
+                 "_stream_proxy_ctrl_socket", "_stream_proxy_sockets",
                  "_zmq_streams", "_zmq_stream_ctrl_sockets",
                  "_call_signature", "_call_encodings", "_call_enabled",
                  "_calls_by_frequency", "_call_frequencies",
                  "_locks_by_frequency", "_threads", "_manual_broadcast_sockets",
                  "_manual_broadcast_encodings", "_keep_broadcasting",
                  "_proxy_thread", "_is_running")
+    STREAM_PROXY_CTRL_ADDRESS = "inproc://stream_proxy_control"
 
     def __init__(self, protocol: Protocol = "tcp", interface: str = "*",
                  port: str = "5556", context: zmq.Context = None):
@@ -42,6 +44,13 @@ class ZMQStreamServer:
         self._xpub_socket.bind(pub_address)
         self.log.debug(f"Creating zmq proxy to forward messages from: "
                        f"{self._worker_url} to {pub_address}.")
+        self._stream_proxy_ctrl_socket = self._context.socket(zmq.REP)
+        self._stream_proxy_ctrl_socket.setsockopt(zmq.LINGER, 0)
+        self._stream_proxy_ctrl_socket.bind(self.STREAM_PROXY_CTRL_ADDRESS)
+        # Save these together for closing them later.
+        self._stream_proxy_sockets = {self._xpub_socket, self._xsub_socket,
+                                      self._stream_proxy_ctrl_socket}
+
         # zmq stream proxy threads and control sockets
         self._zmq_streams = {}
         self._zmq_stream_ctrl_sockets = {}
@@ -72,7 +81,10 @@ class ZMQStreamServer:
             raise RuntimeError("Streamer is already running!")
         if not run_in_thread:
             self._is_running = True
-            zmq.proxy(self._xpub_socket, self._xsub_socket)  # Does not return.
+            # Next line does not return unless the proxy is TERMINATEd.
+            zmq.proxy_steerable(self._xpub_socket, self._xsub_socket,
+                                control=self._stream_proxy_ctrl_socket)
+            self.log.debug("Main proxy exited.")
         else:  # If we need to return
             self._proxy_thread = Thread(target=self.run, args=[False],
                                         daemon=True)
@@ -350,13 +362,32 @@ class ZMQStreamServer:
         return streams.model_dump() if as_dict else streams
 
     def close(self):
-        """Exit all threads gracefully."""
+        """Exit all threads gracefully.
+        If manual streams were created, stop sending data via the created handler
+        functions first. Then call this method last.
+        """
         self._keep_broadcasting.clear()
         for thread in self._threads.values():
             thread.join()
+        # Warning: technically we can't close out manual broadcast sockets in a
+        # threadsafe way, so we rely on the user to stop using the related
+        # callback function.
         for socket in self._manual_broadcast_sockets.values():
             socket.close()
         for socket in self._zmq_stream_ctrl_sockets.values():
             socket.send_string("TERMINATE")
+        # Because sockets are not threadsafe, we must create a one-off socket to
+        # shutdown the steerable proxy before we can close the related sockets.
+        stream_proxy_ctrl_socket = self._context.socket(zmq.REQ)
+        stream_proxy_ctrl_socket.setsockopt(zmq.LINGER, 0)
+        stream_proxy_ctrl_socket.connect(self.STREAM_PROXY_CTRL_ADDRESS)
+        stream_proxy_ctrl_socket.send_string("TERMINATE")
+        stream_proxy_ctrl_socket.recv() # Wait for empty message to confirm.
+        stream_proxy_ctrl_socket.close()
+        if self._proxy_thread and self._proxy_thread.is_alive():
+            self._proxy_thread.join()
+        # Now we can call close:
+        for socket in self._stream_proxy_sockets:
+            socket.close()
         if not self._context_managed_externally:
             self._context.term()
