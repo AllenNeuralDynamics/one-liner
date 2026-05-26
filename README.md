@@ -153,7 +153,9 @@ while True:
 In the PC acting as the client--there are no changes!
 It's just the same example client code as before.
 
-#### from another zmq socket
+#### Streaming from an existing ZMQ Socket
+It's possible to relay data from an existing ZMQ Socket as if it were another stream coming from a `RouterServer`.
+
 **TODO**: see the **relay_zmq_video_stream** example folder for now.
 
 ### Handling Received Data
