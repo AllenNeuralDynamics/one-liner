@@ -12,7 +12,8 @@ class ZMQStreamServer:
        at a specified frequency."""
     __slots__ = ("log", "port", "_context_managed_externally", "_worker_url",
                  "_context", "_xsub_socket", "_xpub_socket",
-                 "_stream_proxy_ctrl_socket", "_stream_proxy_sockets",
+                 "_stream_proxy_ctrl_socket", "_stream_proxy_ctrl_address",
+                 "_stream_proxy_sockets",
                  "_zmq_streams",  "_zmq_stream_xsub_sockets",
                  "_zmq_stream_xpub_sockets", "_zmq_stream_cap_sockets",
                  "_zmq_stream_ctrl_sockets",
@@ -21,7 +22,6 @@ class ZMQStreamServer:
                  "_locks_by_frequency", "_threads", "_manual_broadcast_sockets",
                  "_manual_broadcast_encodings", "_keep_broadcasting",
                  "_proxy_thread", "_is_running")
-    STREAM_PROXY_CTRL_ADDRESS = "inproc://stream_proxy_control"
 
     def __init__(self, protocol: Protocol = "tcp", interface: str = "*",
                  port: str = "5556", context: zmq.Context = None):
@@ -48,7 +48,8 @@ class ZMQStreamServer:
                        f"{self._worker_url} to {pub_address}.")
         self._stream_proxy_ctrl_socket = self._context.socket(zmq.REP)
         self._stream_proxy_ctrl_socket.setsockopt(zmq.LINGER, 0)
-        self._stream_proxy_ctrl_socket.bind(self.STREAM_PROXY_CTRL_ADDRESS)
+        self._stream_proxy_ctrl_address = f"inproc://stream_proxy_control:{id(self)}"
+        self._stream_proxy_ctrl_socket.bind(self._stream_proxy_ctrl_address)
         # Save these together for closing them later.
         self._stream_proxy_sockets = {self._xpub_socket, self._xsub_socket,
                                       self._stream_proxy_ctrl_socket}
@@ -196,7 +197,7 @@ class ZMQStreamServer:
         self._zmq_stream_xpub_sockets[name] = xpub_socket
 
         capture_socket = None
-        capture_socket_address = f"inproc://{name}_cap_socket_debug"
+        capture_socket_address = f"inproc://{name}_cap_socket_debug:{id(self)}"
         if log_chatter:
             capture_socket = self._context.socket(zmq.PUB)
             capture_socket.setsockopt(zmq.LINGER, 0)
@@ -205,7 +206,7 @@ class ZMQStreamServer:
 
         ctrl_socket = self._context.socket(zmq.PAIR)
         ctrl_socket.setsockopt(zmq.LINGER, 0)
-        ctrl_socket_address = f"inproc://{name}_stream_proxy_control"
+        ctrl_socket_address = f"inproc://{name}_stream_proxy_control:{id(self)}"
         ctrl_socket.bind(ctrl_socket_address)
         self._zmq_stream_ctrl_sockets[name] = ctrl_socket
         # Create a steerable zmq proxy and run it in a separate daemon thread.
@@ -423,7 +424,7 @@ class ZMQStreamServer:
         # shutdown the steerable proxy before we can close the related sockets.
         stream_proxy_ctrl_socket = self._context.socket(zmq.REQ)
         stream_proxy_ctrl_socket.setsockopt(zmq.LINGER, 0)
-        stream_proxy_ctrl_socket.connect(self.STREAM_PROXY_CTRL_ADDRESS)
+        stream_proxy_ctrl_socket.connect(self._stream_proxy_ctrl_address)
         stream_proxy_ctrl_socket.send_string("TERMINATE")
         stream_proxy_ctrl_socket.recv() # Wait for empty reply to confirm.
         stream_proxy_ctrl_socket.close()
