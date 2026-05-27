@@ -61,6 +61,50 @@ pip install -e .[examples]
 ```
 
 
+## Quick Reference
+
+### Vocabulary
+
+| Term    | Description                                                                                                                                                                               |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Server  | A Python process with functions and objects made available for remote communication. For instance, a collection of hardware drivers running on a lab computer.                            |
+| Streams | Servers can be configured to automatically call functions at a given frequency (e.g., every second) and post their results through one-liner for consumption.                             |
+| Client  | A Python process that connects to a one-liner server, sends commands to server functions/objects, and receives data from server streams.                                                  |
+| RPC     | Remote Procedure Call, an architecture wherein a client can "call a function", but the actual function logic gets run somewhere else, in a different process, or on a different computer. |
+| ZMQ     | [ZeroMQ](https://zeromq.org/), a messaging library that is used as the communication layer by one-liner                                                                                   |
+
+### RouterClient
+
+| Method                                            | Description                                                                                        |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `call_by_name(call_name: str, args, kwargs, ...)` | Tell the server to call a function (the server must be configured with a named function).          |
+| `call(obj_name, attr_name, ...)`                  | Tell the server to call a method on one of the objects in its namespace.                           |
+| `configure_stream(name, ...)`                     | Configure the client to either buffer data from a stream or only hold onto the most recent packet. |
+| `get_stream(name)`                                | Get data from a stream.                                                                            |
+| `enable_stream(name)`                             | Tell the server to begin calling the configured stream function.                                   |
+| `disable_stream(name)`                            | Tell the server to stop calling the configured stream function.                                    |
+| `get_stream_configurations()`                     | Ask the server for a description of all its streams.                                               |
+
+### RouterServer
+
+| Attributes  | Description                                           |
+| ----------- | ----------------------------------------------------- |
+| `instances` | a dict of objects to make available through one-liner |
+
+| Methods                                                                         | Description                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run(block=False)`                                                              | Start the server RPC listener and broadcaster.                                                                                                                                                                                          |
+| `add_named_call(call_name, obj_name, attr_name, ...)`                           | Set up a function that can be called by name from the client.                                                                                                                                                                           |
+| `add_stream(stream_name, frequency_hz, obj_name, attr_name, ...)`               | Set up a function to be called automatically at a given frequency, with results sent over one-liner.                                                                                                                                    |
+| `add_stream_from_callable(stream_name, frequency_hz, obj_name, attr_name, ...)` | Same as `add_stream`, but for a bare function instead of an object method.                                                                                                                                                              |
+| `add_zmq_stream(name, address, enabled, ...)`                                   | Add a stream output that, instead of calling a function periodically, connects to a ZMQ PUB socket and forwards messages.                                                                                                               |
+| `get_stream_fn(name)`                                                           | Add a stream output tha, instead of the Server automatically calling a function periodically, lets application code run at its own rate and periodically push data into the stream by calling the function returned by `get_stream_fn`. |
+| `enable_stream(name)`                                                           | Begin calling the stream function at its configured frequency.                                                                                                                                                                          |
+| `disable_stream(name)`                                                          | Stop calling the stream function at its configured frequency.                                                                                                                                                                           |
+| `remove_stream(name)`                                                           | Remove a stream from the server configuration.                                                                                                                                                                                          |
+| `get_version()`                                                                 | Get the one_liner version the server is running.                                                                                                                                                                                        |
+| `close()`                                                                       | Close server resources.                                                                                                                                                                                                                 |
+
 ## Quickstart
 
 ### Remote Function Execution
