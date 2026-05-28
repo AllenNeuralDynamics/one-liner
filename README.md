@@ -325,39 +325,13 @@ pip install -e .[docs]
 ```
 
 ### Building the Docs
-<!--
-To generate the rst files source files for documentation, from this directory, run
-```bash
-uv run sphinx-apidoc -o docs/source/ src
-```
-(You only need to do this once.)
--->
 
 To update the documentation and generate HTML files, from the project root directory, run
 ```bash
-uv run sphinx-build -b html docs/source/ docs/_build/html
+uv run mkdocs build
 ```
 
-<!--
-## Code Quality Check
-
-The following are tools used to ensure code quality in this project.
-
-- Unit Testing
-
+To view the docs locally, run: 
 ```bash
-uv run pytest tests
+uv run mkdocs serve
 ```
-
-- Linting
-
-```bash
-uv run ruff check
-```
-
-- Type Check
-
-```bash
-uv run mypy src/mypackage
-```
--->

@@ -1,4 +1,0 @@
-Sphinx
-sphinx-jinja
-furo
-docutils

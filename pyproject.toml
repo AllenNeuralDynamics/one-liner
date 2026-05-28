@@ -25,10 +25,11 @@ examples = [
     "ruff>=0.9.9",
 ]
 docs = [
-    'Sphinx',
-    'sphinx-jinja',
-    'furo',
-    'docutils'
+    'mkdocs <= 2.0.0',
+    'mkdocs-material',
+    'mkdocs-autorefs',
+    'mkdocstrings',
+    'mkdocstrings-python',
 ]
 
 [build-system]
