@@ -153,7 +153,7 @@ class RouterServer:
                           func=func, args=args, kwargs=kwargs,
                           enabled=enabled, serializer=serializer)
 
-    def add_zmq_stream(self, name: str, address: str, enabled: True,
+    def add_zmq_stream(self, name: str, address: str, enabled: bool = True,
                        log_chatter: bool = False):
         """ Add a stream from an existing zmq PUB socket source (including
         another existing :py:class:`~one_liner.server.RouterServer`).
