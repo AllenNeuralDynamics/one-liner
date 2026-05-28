@@ -1,6 +1,6 @@
 #!/usr/bin/env/python3
 
-import pytest
+import zmq
 from random import uniform
 from one_liner.client import ZMQRPCClient
 from one_liner.server import ZMQRPCServer
@@ -23,17 +23,22 @@ class SensorArray:
 
 def test_rpc_server_creation():
     server = ZMQRPCServer()
+    server.run()
+    server.close()
+    zmq.Context.instance().term()
 
 
 def test_request_and_reply():
     sensors = SensorArray()  # Create an object
-    server = ZMQRPCServer(sensors=sensors)  # Create a server.
+    server = ZMQRPCServer(instances = {"sensors": sensors})  # Create a server.
     client = ZMQRPCClient()  # Create a server.
     server.run()
 
-    data = client.call("sensors", "get_data", 0)
+    data = client.call("sensors", "get_data", args=[0])
     try:
         assert 0 in data
         assert 0.0 <= data[0] <= 5.0
     finally:
-        server.stop()
+        server.close()
+        client.close()
+        zmq.Context.instance().term()

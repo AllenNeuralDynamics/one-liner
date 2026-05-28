@@ -61,6 +61,50 @@ pip install -e .[examples]
 ```
 
 
+## Quick Reference
+
+### Vocabulary
+
+| Term    | Description                                                                                                                                                                               |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Server  | A Python process with functions and objects made available for remote communication. For instance, a collection of hardware drivers running on a lab computer.                            |
+| Streams | Servers can be configured to automatically call functions at a given frequency (e.g., every second) and post their results through one-liner for consumption.                             |
+| Client  | A Python process that connects to a one-liner server, sends commands to server functions/objects, and receives data from server streams.                                                  |
+| RPC     | Remote Procedure Call, an architecture wherein a client can "call a function", but the actual function logic gets run somewhere else, in a different process, or on a different computer. |
+| ZMQ     | [ZeroMQ](https://zeromq.org/), a messaging library that is used as the communication layer by one-liner                                                                                   |
+
+### RouterClient
+
+| Method                                            | Description                                                                                        |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `call_by_name(call_name: str, args, kwargs, ...)` | Tell the server to call a function (the server must be configured with a named function).          |
+| `call(obj_name, attr_name, ...)`                  | Tell the server to call a method on one of the objects in its namespace.                           |
+| `configure_stream(name, ...)`                     | Configure the client to either buffer data from a stream or only hold onto the most recent packet. |
+| `get_stream(name)`                                | Get data from a stream.                                                                            |
+| `enable_stream(name)`                             | Tell the server to begin calling the configured stream function.                                   |
+| `disable_stream(name)`                            | Tell the server to stop calling the configured stream function.                                    |
+| `get_stream_configurations()`                     | Ask the server for a description of all its streams.                                               |
+
+### RouterServer
+
+| Attributes  | Description                                           |
+| ----------- | ----------------------------------------------------- |
+| `instances` | a dict of objects to make available through one-liner |
+
+| Methods                                                                         | Description                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run(block=False)`                                                              | Start the server RPC listener and broadcaster.                                                                                                                                                                                          |
+| `add_named_call(call_name, obj_name, attr_name, ...)`                           | Set up a function that can be called by name from the client.                                                                                                                                                                           |
+| `add_stream(stream_name, frequency_hz, obj_name, attr_name, ...)`               | Set up a function to be called automatically at a given frequency, with results sent over one-liner.                                                                                                                                    |
+| `add_stream_from_callable(stream_name, frequency_hz, obj_name, attr_name, ...)` | Same as `add_stream`, but for a bare function instead of an object method.                                                                                                                                                              |
+| `add_zmq_stream(name, address, enabled, ...)`                                   | Add a stream output that, instead of calling a function periodically, connects to a ZMQ PUB socket and forwards messages.                                                                                                               |
+| `get_stream_fn(name)`                                                           | Add a stream output tha, instead of the Server automatically calling a function periodically, lets application code run at its own rate and periodically push data into the stream by calling the function returned by `get_stream_fn`. |
+| `enable_stream(name)`                                                           | Begin calling the stream function at its configured frequency.                                                                                                                                                                          |
+| `disable_stream(name)`                                                          | Stop calling the stream function at its configured frequency.                                                                                                                                                                           |
+| `remove_stream(name)`                                                           | Remove a stream from the server configuration.                                                                                                                                                                                          |
+| `get_version()`                                                                 | Get the one_liner version the server is running.                                                                                                                                                                                        |
+| `close()`                                                                       | Close server resources.                                                                                                                                                                                                                 |
+
 ## Quickstart
 
 ### Remote Function Execution
@@ -93,7 +137,7 @@ result = client.call("my_horn", "beep") # call a func/method w/ args & kwargs; r
 ### Streaming Data
 There are three ways to stream data from a `RouterServer` to one or more `RouterClient` objects.
 
-#### Periodic Broadcasting
+#### Periodic Streaming
 In the PC acting as the server:
 ```python
 from one_liner.server import RouterServer
@@ -105,9 +149,9 @@ def get_frame():
   return video.read()[1] # just get the frame.
 
 server = RouterServer()
-server.add_stream("live_video", # name of the stream
-                  30,  # How fast to call this function.
-                  get_frame) # func to call (no *args or **kwargs in this case).
+server.add_stream_from_callable("live_video", # name of the stream
+                                30,  # How fast to call this function.
+                                get_frame) # function to call.
 server.run(run_in_thread=False)  # block, but we can not-block if set to True. That's it!
 ```
 
@@ -132,8 +176,8 @@ while True:
 That's it!
 
 
-#### Application-Controlled
-Instead of having `RouterServer` periodically call a function in a thread, it's also possible to have your native application send data.
+#### Application-Controlled Streaming
+Instead of having `RouterServer` periodically call a function in a thread, it's also possible to have your native application send data via a handler function.
 
 In the PC acting as the server:
 ```python
@@ -143,7 +187,7 @@ import cv2
 video = cv2.VideoCapture(0) # Get the first available camera.
 
 server = RouterServer()
-send_frame = server.get_broadcast_fn("live_video")
+send_frame = server.get_broadcast_fn("live_video") # Create the handler function.
 server.run()  # don't block.
 
 while True:
@@ -153,8 +197,10 @@ while True:
 In the PC acting as the client--there are no changes!
 It's just the same example client code as before.
 
-#### from another zmq socket
-**TODO**: see the examples folder for now.
+#### Streaming from an existing ZMQ Socket
+It's possible to relay data from an existing ZMQ Socket as if it were another stream coming from a `RouterServer`.
+
+**TODO**: see the **relay_zmq_video_stream** example folder for now.
 
 ### Handling Received Data
 
@@ -176,6 +222,35 @@ client.enable_stream("live_video")  # the connected Router will not send this st
 # ...
 client.disable_stream("live_video")  # the connected Router will send the stream
 ```
+
+### Init from Config
+
+It's possible to drive the creation of remote function calls and streams from a config dictionary provided that the object instance also exists in the instance dict.
+
+Recall that, to create a `RouterServer`, we can optionally pass in a dictionary of object instances.
+Now we additionally pass in a config.
+
+```python
+config = {
+    "named_calls":
+    {
+        "set_axis_position":
+            {
+              "obj_name": "my_horn",
+              "attr_name": "beep",
+              "args": [],   # If args are empty, we can also omit this field.
+              "kwargs": {}, # If kwargs are empty, we can also omit this field.
+            }
+    },
+    "periodic_streams": {}
+}
+
+server = RouterServer(instances={"my_horn": my_horn}, config=config)
+server.run()
+```
+
+Now, just like before, a connected client can `client.call("my_horn", "beep")` like before.
+
 
 ## Implementation Details
 

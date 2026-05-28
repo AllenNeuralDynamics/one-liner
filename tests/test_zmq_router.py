@@ -1,6 +1,6 @@
 #!/usr/bin/env/python3
 
-import pytest
+import zmq
 from random import uniform
 from one_liner.client import RouterClient
 from one_liner.server import RouterServer
@@ -23,6 +23,7 @@ class SensorArray:
 
 def test_server_creation():
     server = RouterServer()  # Create a server.
+    server.run()
     server.close()
 
 
@@ -33,13 +34,17 @@ def test_many_client_receive():
     clients = [RouterClient(), RouterClient()]
 
     # Broadcast a method at 10 Hz.
-    server.add_broadcast(10, sensors.get_data, sensor_index)
+    server.add_stream_from_callable("sensor_data", 10, sensors.get_data, args=[0])
+    server.run()
 
-    received_data = None
+    for client in clients:
+        client.configure_stream("sensor_data")
     start_time = now()
     while ((now() - start_time) < 1):
-        received_data0 = clients[0].receive_broadcast()
-        received_data1 = clients[1].receive_broadcast()
+        received_data0 = clients[0].get_stream("sensor_data", block=True)
+        received_data1 = clients[1].get_stream("sensor_data", block=True)
         print(f"received: {received_data0} | {received_data1}")
-        #assert 0.0 <= received_data[sensor_index] <= 5.0
     server.close()
+    for client in clients:
+        client.close()
+    zmq.Context.instance().term()

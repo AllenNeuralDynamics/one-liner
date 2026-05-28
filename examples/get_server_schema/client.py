@@ -5,4 +5,4 @@ from one_liner.client import RouterClient
 
 if __name__ == "__main__":
     client = RouterClient()
-    pprint.pprint(client.get_stream_configurations())
+    pprint.pprint(client.get_stream_configurations(as_dict=True))

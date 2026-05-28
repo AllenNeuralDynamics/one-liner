@@ -12,7 +12,11 @@ class ZMQStreamServer:
        at a specified frequency."""
     __slots__ = ("log", "port", "_context_managed_externally", "_worker_url",
                  "_context", "_xsub_socket", "_xpub_socket",
-                 "_zmq_streams", "_zmq_stream_ctrl_sockets",
+                 "_stream_proxy_ctrl_socket", "_stream_proxy_ctrl_address",
+                 "_stream_proxy_sockets",
+                 "_zmq_streams",  "_zmq_stream_xsub_sockets",
+                 "_zmq_stream_xpub_sockets", "_zmq_stream_cap_sockets",
+                 "_zmq_stream_ctrl_sockets",
                  "_call_signature", "_call_encodings", "_call_enabled",
                  "_calls_by_frequency", "_call_frequencies",
                  "_locks_by_frequency", "_threads", "_manual_broadcast_sockets",
@@ -42,8 +46,19 @@ class ZMQStreamServer:
         self._xpub_socket.bind(pub_address)
         self.log.debug(f"Creating zmq proxy to forward messages from: "
                        f"{self._worker_url} to {pub_address}.")
+        self._stream_proxy_ctrl_socket = self._context.socket(zmq.REP)
+        self._stream_proxy_ctrl_socket.setsockopt(zmq.LINGER, 0)
+        self._stream_proxy_ctrl_address = f"inproc://stream_proxy_control:{id(self)}"
+        self._stream_proxy_ctrl_socket.bind(self._stream_proxy_ctrl_address)
+        # Save these together for closing them later.
+        self._stream_proxy_sockets = {self._xpub_socket, self._xsub_socket,
+                                      self._stream_proxy_ctrl_socket}
+
         # zmq stream proxy threads and control sockets
         self._zmq_streams = {}
+        self._zmq_stream_xsub_sockets = {}
+        self._zmq_stream_xpub_sockets = {}
+        self._zmq_stream_cap_sockets = {}
         self._zmq_stream_ctrl_sockets = {}
         # Periodic stream data structures
         self._call_signature: dict[str, tuple] = {}
@@ -72,7 +87,10 @@ class ZMQStreamServer:
             raise RuntimeError("Streamer is already running!")
         if not run_in_thread:
             self._is_running = True
-            zmq.proxy(self._xpub_socket, self._xsub_socket)  # Does not return.
+            # Next line does not return unless the proxy is TERMINATEd.
+            zmq.proxy_steerable(self._xpub_socket, self._xsub_socket,
+                                control=self._stream_proxy_ctrl_socket)
+            self.log.debug("Main proxy exited.")
         else:  # If we need to return
             self._proxy_thread = Thread(target=self.run, args=[False],
                                         daemon=True)
@@ -100,6 +118,7 @@ class ZMQStreamServer:
         self._call_signature[name] = (func, args, kwargs)
         self._call_frequencies[name] = frequency_hz
         self._call_encodings[name] = serializer
+        self._call_enabled[name] = False
         if enabled:
             self.enable(name)
         # Store call by frequency.
@@ -148,7 +167,7 @@ class ZMQStreamServer:
         msg = f"Creating send function for stream {name} with {tstamp_option} timestamp."
         self.log.debug(msg)
         if set_timestamp:
-            return lambda data, timestamp, s=socket, n=name, success=True, e=serializer: \
+            return lambda timestamp, data, s=socket, n=name, success=True, e=serializer: \
                 _send(s, n, data, timestamp=timestamp, success=success, serializer=e)
         return lambda data, s=socket, n=name, success=True, e=serializer: \
             _send(s, n, data, success=success, serializer=e)
@@ -170,22 +189,26 @@ class ZMQStreamServer:
         xsub_socket = self._context.socket(zmq.XSUB)
         xsub_socket.setsockopt(zmq.LINGER, 0)
         xsub_socket.connect(address)
+        self._zmq_stream_xsub_sockets[name] = xsub_socket
 
         xpub_socket = self._context.socket(zmq.XPUB)
         xpub_socket.setsockopt(zmq.LINGER, 0)
         xpub_socket.connect(self._worker_url)
+        self._zmq_stream_xpub_sockets[name] = xpub_socket
 
         capture_socket = None
-        capture_socket_address = f"inproc://{name}_cap_socket_debug"
+        capture_socket_address = f"inproc://{name}_cap_socket_debug:{id(self)}"
         if log_chatter:
             capture_socket = self._context.socket(zmq.PUB)
             capture_socket.setsockopt(zmq.LINGER, 0)
             capture_socket.bind(capture_socket_address)
+            self._zmq_stream_cap_sockets[name] = capture_socket
 
         ctrl_socket = self._context.socket(zmq.PAIR)
         ctrl_socket.setsockopt(zmq.LINGER, 0)
-        ctrl_socket_address = f"inproc://{name}_stream_proxy_control"
+        ctrl_socket_address = f"inproc://{name}_stream_proxy_control:{id(self)}"
         ctrl_socket.bind(ctrl_socket_address)
+        self._zmq_stream_ctrl_sockets[name] = ctrl_socket
         # Create a steerable zmq proxy and run it in a separate daemon thread.
         self.log.warning("Creating socket")
         self._zmq_streams[name] = Thread(target=zmq.proxy_steerable,
@@ -194,7 +217,7 @@ class ZMQStreamServer:
                                                 "control": ctrl_socket},
                                          daemon=True)
         self._zmq_streams[name].start()
-        ext_ctrl_socket = self._context.socket(zmq.PAIR)
+        ext_ctrl_socket = self._context.socket(zmq.REP)
         ext_ctrl_socket.connect(ctrl_socket_address)
         self._zmq_stream_ctrl_sockets[name] = ext_ctrl_socket
         # pause if not enabled. (We can't start paused, so approximate.)
@@ -220,13 +243,43 @@ class ZMQStreamServer:
 
         Thread(target=log_socket_chatter, args=[self], daemon=True).start()
 
+    def remove_zmq_stream(self, name: str):
+        """Remove a zmq stream (i.e: a relay) and release related resources."""
+        # Confirm zmq stream exists.
+        if name not in self._zmq_streams:
+            raise ValueError(f"zmq stream: '{name}' does not exist.")
+        # Because sockets are not threadsafe, we must create a one-off socket to
+        # shutdown the steerable proxy before we can close the related sockets.
+        zmq_stream_proxy_ctrl_socket = self._context.socket(zmq.REQ)
+        zmq_stream_proxy_ctrl_socket.setsockopt(zmq.LINGER, 0)
+        zmq_stream_proxy_ctrl_socket.connect(self.STREAM_PROXY_CTRL_ADDRESS)
+        zmq_stream_proxy_ctrl_socket.send_string("TERMINATE")
+        zmq_stream_proxy_ctrl_socket.recv() # Wait for empty reply to confirm.
+        zmq_stream_proxy_ctrl_socket.close()
+        # Cleanup thread tracking
+        proxy_thread = self._zmq_streams[name]
+        if proxy_thread.is_alive():
+            proxy_thread.join()
+        del self._zmq_streams[name]
+        # Close all related sockets now that the proxy is shutdown.
+        dicts = {self._zmq_stream_xsub_sockets, self._zmq_stream_xpub_sockets,
+            self._zmq_stream_ctrl_sockets}
+        for dict in dicts:
+            socket = dict[name]
+            socket.close()
+            del dict[name]
+        try:
+            socket = dict[name]
+            socket.close()
+            del self._zmq_stream_cap_sockets[name]
+        except KeyError:
+            pass
+
     def remove(self, name: str):
         """Remove a broadcasting function call that was previously added."""
         if name in self._zmq_streams:
             # Delete zmq proxy stream related data.
-            self._zmq_stream_ctrl_sockets[name].send_string("TERMINATE")
-            del self._zmq_streams[name]
-            del self._zmq_stream_ctrl_sockets[name]
+            self.remove_zmq_stream(name)
             return
         if name in self._call_frequencies:
             # Delete periodic-stream-related data.
@@ -256,7 +309,8 @@ class ZMQStreamServer:
             while self._keep_broadcasting.is_set():
                 # Prevent size change in self.calls_by_frequency during iteration.
                 with self._locks_by_frequency[frequency_hz]:
-                    if not self._calls_by_frequency[frequency_hz]: # exit.
+                    # Exit if there's nothing to publish
+                    if not self._calls_by_frequency[frequency_hz]:
                         break
                     for stream_name in self._calls_by_frequency[frequency_hz]:
                         if stream_name not in self._call_enabled:
@@ -305,7 +359,7 @@ class ZMQStreamServer:
         if name in self._zmq_streams:
             self._zmq_stream_ctrl_sockets[name].send_string("RESUME")
             return
-        # Enable manual stream
+        # Enable periodic stream
         if name in self._call_signature:
             self._call_enabled[name] = True
             return
@@ -350,13 +404,34 @@ class ZMQStreamServer:
         return streams.model_dump() if as_dict else streams
 
     def close(self):
-        """Exit all threads gracefully."""
+        """Exit all threads gracefully.
+        If manual streams were created, stop sending data via the created handler
+        functions first. Then call this method last.
+        """
         self._keep_broadcasting.clear()
         for thread in self._threads.values():
             thread.join()
+        # Close zmq streams via built-in method.
+        # Work off of a copy of names bc we iterate destructively
+        for zmq_stream_name in list(self._zmq_streams.keys()):
+            self.remove_zmq_stream(zmq_stream_name)
+        # Warning: technically we can't close out manual broadcast sockets in a
+        # threadsafe way, so we rely on the user to stop using the related
+        # callback function.
         for socket in self._manual_broadcast_sockets.values():
             socket.close()
-        for socket in self._zmq_stream_ctrl_sockets.values():
-            socket.send_string("TERMINATE")
+        # Because sockets are not threadsafe, we must create a one-off socket to
+        # shutdown the steerable proxy before we can close the related sockets.
+        stream_proxy_ctrl_socket = self._context.socket(zmq.REQ)
+        stream_proxy_ctrl_socket.setsockopt(zmq.LINGER, 0)
+        stream_proxy_ctrl_socket.connect(self._stream_proxy_ctrl_address)
+        stream_proxy_ctrl_socket.send_string("TERMINATE")
+        stream_proxy_ctrl_socket.recv() # Wait for empty reply to confirm.
+        stream_proxy_ctrl_socket.close()
+        if self._proxy_thread and self._proxy_thread.is_alive():
+            self._proxy_thread.join()
+        # Now we can call close:
+        for socket in self._stream_proxy_sockets:
+            socket.close()
         if not self._context_managed_externally:
             self._context.term()

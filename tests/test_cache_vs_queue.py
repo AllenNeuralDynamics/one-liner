@@ -1,6 +1,7 @@
 #!/usr/bin/env/python3
 
-import pytest
+from re import I
+
 import zmq
 from collections import deque
 from random import uniform
@@ -44,7 +45,8 @@ def test_caching_option():
 
     try:
         # Broadcast a method at 100 Hz.
-        server.add_stream("measurement", SEND_RATE, sensors.get_data, args=[sensor_index])
+        server.add_stream_from_callable("measurement", SEND_RATE,
+                                        sensors.get_data, args=[sensor_index])
         server.run()
 
         # Configure which topic to receive and how to store the data.
@@ -75,7 +77,7 @@ def test_caching_option():
     finally:
         server.close()
         client.close()
-        zmq.Context.instance().destroy() # We shouldn't have to do this.
+        zmq.Context.instance().term()
 
 
 def test_get_last_sent_value():
@@ -112,4 +114,4 @@ def test_get_last_sent_value():
     finally:
         client.close()
         server.close()
-        zmq.Context.instance().destroy()
+        zmq.Context.instance().term()
