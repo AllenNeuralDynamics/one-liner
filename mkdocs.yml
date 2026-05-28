@@ -1,0 +1,30 @@
+site_name: one-liner
+site_description: Remote RPC and streaming utilities over ZeroMQ.
+repo_url: https://github.com/AllenNeuralDynamics/one-liner
+site_dir: site
+
+docs_dir: docs
+
+theme:
+  name: material
+
+plugins:
+  - search
+  - autorefs
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths:
+            - src
+          options:
+            show_root_heading: true
+            show_source: false
+            members_order: source
+            docstring_style: sphinx
+
+nav:
+  - Home: index.md
+  - API:
+      - Client: api/client.md
+      - Server: api/server.md

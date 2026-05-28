@@ -1,6 +1,6 @@
 [project]
 name = "one_liner"
-version = "0.1.1.dev3"
+version = "0.1.1.dev4"
 
 readme = "README.md"
 requires-python = ">=3.11"
@@ -25,10 +25,11 @@ examples = [
     "ruff>=0.9.9",
 ]
 docs = [
-    'Sphinx',
-    'sphinx-jinja',
-    'furo',
-    'docutils'
+    'mkdocs == 1.*',
+    'mkdocs-material',
+    'mkdocs-autorefs',
+    'mkdocstrings',
+    'mkdocstrings-python',
 ]
 
 [build-system]
