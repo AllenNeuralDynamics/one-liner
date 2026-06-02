@@ -31,13 +31,6 @@ def test_server_creation():
     server.close()
     # Debugging: show all open sockets
     ctx = zmq.Context.instance()
-    if hasattr(ctx, '_sockets'):
-        # Extract the actual socket objects from the weak references
-        open_sockets = [s for s in ctx._sockets if s is not None]
-        print(f"Context is waiting for {len(open_sockets)} socket(s):")
-        for s in open_sockets:
-            # Print socket type and its memory address for identification
-            print(f" - Socket Type: {s.socket_type}, Address: {hex(id(s))}")
     zmq.Context.instance().term()
 
 

@@ -27,7 +27,7 @@ DESERIALIZERS: dict[Encoding, Callable] = \
 
 
 def _send(socket: zmq.Context.socket, name: str, data: bytes | Any,
-          send_timestamp: bool = True, timestamp: float = None, success: bool = True,
+          timestamp: float = None, success: bool = True,
           serializer: Encoding | Callable = "pickle"):
     """Send the data on tne specified socket prefixed with the specified
     stream name. Used in both RPC and StreamServer
@@ -36,7 +36,6 @@ def _send(socket: zmq.Context.socket, name: str, data: bytes | Any,
     :param name: stream name. Under the hood, this is the topic.
     :param data: data to send. If the data is not `bytes`-like, the
        :paramref:`ZMQStreamServer._send.encoding` option cannot be None.
-    :param send_timestamp: if True, send a timestamp associated with the data.
     :param timestamp: if specified, send the data with a custom timestamp
        instead of the default ``time.perf_counter``.
     :param success: True if the data being sent was returned from a function
@@ -56,7 +55,7 @@ def _send(socket: zmq.Context.socket, name: str, data: bytes | Any,
     # It's a little clunky that we need to send the size of the pickled
     # metadata, but it prevents us from doing an extra copy into a
     # io.BytesIO object on the receiving end.
-    metadata = success if not send_timestamp else (success, timestamp)
+    metadata = (success, timestamp)
     metadata_bytes = pickle.dumps(metadata)
     metadata_num_bytes = len(metadata_bytes)
     serialize = SERIALIZERS.get(serializer, serializer)
@@ -68,12 +67,10 @@ def _send(socket: zmq.Context.socket, name: str, data: bytes | Any,
 
 
 def _recv(socket: zmq.Context.socket, flag: zmq.Flag = 0, prefix: str | None = None,
-          has_timestamp: bool = True, deserializer: Encoding | Callable = "pickle") -> (
-        Tuple[bool, Any] | Tuple[bool, float, Any]):
+          deserializer: Encoding | Callable = "pickle") -> Tuple[bool, float, Any]:
     """Receive data from a zmq socket and deserialize it.
 
     :param flag: additional zmq flag to pass to the socket
-    :param has_timestamp: if the
     :param prefix: a prefix to the data (usually a zmq topic) or `None` if unspecified.
     :param deserializer: the encoding option to decode the data, `None`
        if the data is `bytes`-like, or a user-supplied function to deserialize
@@ -85,14 +82,9 @@ def _recv(socket: zmq.Context.socket, flag: zmq.Flag = 0, prefix: str | None = N
     prefix_len = len(TOPIC_SUFFIX) if prefix is None else len(prefix) + len(TOPIC_SUFFIX)
     # Upack metadata first with pickle.
     metadata_num_bytes = struct.unpack("<H", raw_bytes[prefix_len:prefix_len + 2])[0]
-    # Unpack the timestamp if we know it came with the data.
-    if has_timestamp:
-        success, timestamp = pickle.loads(raw_bytes[prefix_len + 2:])
-        data = deserialize_fn(raw_bytes[prefix_len + 2 + metadata_num_bytes:])
-        return success, timestamp, data
-    success = pickle.loads(raw_bytes[prefix_len + 2:])
+    success, timestamp = pickle.loads(raw_bytes[prefix_len + 2:])
     data = deserialize_fn(raw_bytes[prefix_len + 2 + metadata_num_bytes:])
-    return success, data
+    return success, timestamp, data
 
 
 class RPCException(Exception):
