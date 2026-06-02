@@ -126,7 +126,7 @@ jobs:
   
   build-docs:
     needs: extract_info
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     environment:
       name: github-pages
@@ -139,32 +139,21 @@ jobs:
       pull-requests: write # Necessary to comment on PRs
       contents: read
       packages: write
+
     steps:
     - uses: actions/checkout@v4
     - uses: astral-sh/setup-uv@v5
       with:
         enable-cache: true
 
-    - name: Install dependencies
-      run: uv sync --group docs
-
     - name: Build docs
-      run: uv run mkdocs build
+      run: make docs
 
     - name: Upload artifact
       uses: actions/upload-pages-artifact@v3
       with:
-        path: docs/public_html
+        path: site
         
     - name: Deploy to GitHub Pages
       id: deployment
       uses: actions/deploy-pages@v4
-
-    - name: Deploy to GitHub Pages
-      uses: peaceiris/actions-gh-pages@v3
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: ./docs/_build/html
-        user_name: github-actions[bot]
-        user_email: github-actions[bot]@users.noreply.github.com
-        commit_message: "Update docs for v${{ needs.extract_info.outputs.project_version }}"
