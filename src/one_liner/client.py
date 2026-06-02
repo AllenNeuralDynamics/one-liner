@@ -60,8 +60,8 @@ class RouterClient:
                                              port=broadcast_port,
                                              context=self._context)
 
-    def call_by_name(self, call_name: str, args: list = None, kwargs: dict = None,
-                     get_timestamp: bool = False,
+    def call_by_name(self, call_name: str, args: list | None = None,
+                     kwargs: dict | None = None,
                      deserializer: Encoding | Callable = "pickle") \
             -> Any | Tuple[float, Any]:
 
@@ -82,25 +82,19 @@ class RouterClient:
             will overwrite existing pre-configured args setup with
             [`add_named_call`][one_liner.server.ZMQRPCServer.add_named_call]
             via a standard dict update.
-        get_timestamp :
-            If specified, return the data as a tuple where the first value is a
-            server-specified timestamp.
         deserializer :
             Callable function to deserialize the data or string-representation
             of one of the built-in options.
 
         Returns
         -------
-        object or tuple
-            The result of the call. If `get_timestamp` is true, returns a tuple
-            containing (server_timestamp, result).
+            The result of the call with a timestamp.
         """
         return self.rpc_client.call_by_name(call_name=call_name, args=args,
-                                            get_timestamp=get_timestamp,
                                             kwargs=kwargs, deserializer=deserializer)
 
     def call(self, obj_name: str, attr_name: str, args: list = None,
-             kwargs: dict = None, get_timestamp: bool = False,
+             kwargs: dict = None,
              deserializer: Encoding | Callable = "pickle") \
             -> Any | Tuple[float, Any]:
         """Call a function/method within the scope of the connected
@@ -116,9 +110,6 @@ class RouterClient:
             list of positional arguments for function call
         kwargs:
             dict of keyword arguments for function call
-        get_timestamp:
-            if specified, return the data as a tuple
-            where the first value is a server-specified timestamp.
         deserializer:
             callable function to deserialize the data or
             string-representation of one of the built-in options.
@@ -135,7 +126,6 @@ class RouterClient:
 
         """
         return self.rpc_client.call(obj_name, attr_name, args, kwargs,
-                                    get_timestamp=get_timestamp,
                                     deserializer=deserializer)
 
     def configure_stream(self, name: str,
@@ -255,7 +245,7 @@ class RouterClient:
     @property
     def server_version(self):
         """Return the server version."""
-        return self.rpc_client.call("__router_server", "get_version")
+        return self.rpc_client.call("__router_server", "get_version")[-1]
 
     def close(self):
         """Close the connection to the
@@ -277,33 +267,27 @@ class ZMQRPCClient:
         self.socket.connect(address)
 
     def call_by_name(self, call_name: str, args: list = None, kwargs: dict = None,
-                     get_timestamp: bool = False,
                      deserializer: Encoding | Callable = "pickle") \
             -> Any | Tuple[float, Any]:
         return self.call("__rpc_server", "_call_by_name",
                          args=[call_name], kwargs={"args": args, "kwargs": kwargs},
-                         get_timestamp=get_timestamp, deserializer=deserializer)
+                         deserializer=deserializer)
 
-    def call(self, obj_name: str, attr_name: str, args: list = None,
-             kwargs: dict = None, get_timestamp: bool = False,
-             deserializer: Encoding | Callable = "pickle") \
-        -> Any | Tuple[float, Any]:
+    def call(self, obj_name: str, attr_name: str, args: list | None = None,
+             kwargs: dict | None = None,
+             deserializer: Encoding | Callable = "pickle") -> Tuple[float, Any]:
         """Call a remote function available to the connected
         [`RouterServer`][one_liner.server.RouterServer] and return the result.
 
         """
         args = [] if args is None else args
         kwargs = {} if kwargs is None else kwargs
-        pickled_req = pickle.dumps((obj_name, attr_name, args, kwargs,
-                                    get_timestamp))
+        pickled_req = pickle.dumps((obj_name, attr_name, args, kwargs))
         self.socket.send(pickled_req, copy=False)
-        success, *reply = _recv(self.socket, has_timestamp=get_timestamp,
-                               deserializer=deserializer)
+        success, timestamp, data = _recv(self.socket, deserializer=deserializer)
         if not success:
-            raise RPCException(reply[-1]) # data contains exception string.
-        if get_timestamp:
-            return reply # (timestamp, data)
-        return reply[-1] # data
+            raise RPCException(data) # data contains exception string.
+        return timestamp, data
 
     def close(self):
         self.socket.close()
@@ -315,7 +299,7 @@ class ZMQStreamClient:
     __slots__ = ("log", "context", "address", "sub_sockets", "deserializers")
 
     def __init__(self, protocol: Protocol = "tcp", interface: str = "localhost",
-                 port: str = "5556", context: zmq.Context = None):
+                 port: str = "5556", context: zmq.Context | None = None):
         """
         """
         # Receive periodic broadcasted messages setup.
@@ -364,12 +348,12 @@ class ZMQStreamClient:
             if the underlying function raised an exception while being executed.
         """
         flag = 0 if block else zmq.NOBLOCK
-        success, timestamp, *data = _recv(self.sub_sockets[stream_name], flag=flag,
+        success, timestamp, data = _recv(self.sub_sockets[stream_name], flag=flag,
                                          prefix=stream_name,
                                          deserializer=self.deserializers[stream_name])
         if not success:
             raise StreamException(str(data))
-        return timestamp, *data
+        return timestamp, data
 
     def close(self):
         for name, socket in self.sub_sockets.items():

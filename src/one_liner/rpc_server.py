@@ -52,19 +52,17 @@ class ZMQRPCServer:
             except zmq.Again:
                 continue
             request = pickle.loads(pickled_request)
-            obj_name, attr_name, args, kwargs, get_timestamp = request
+            obj_name, attr_name, args, kwargs = request
             try:
                 reply = self._call(obj_name=obj_name, attr_name=attr_name,
                                    args=args, kwargs=kwargs)
-                _send(self.socket, name="", data=reply, success=True,
-                      send_timestamp=get_timestamp)
+                _send(self.socket, name="", data=reply, success=True)
             except Exception as e:
-                _send(self.socket, name="", data=str(e), success=False,
-                      send_timestamp=get_timestamp)
+                _send(self.socket, name="", data=str(e), success=False)
 
     def add_named_call(self, call_name: str,
                              obj_name: str, attr_name: str,
-                             args: list = None, kwargs: list = None):
+                             args: list | None = None, kwargs: list | None = None):
         """Setup a call to be called with `call_by_name` on the
         :py:class:`~one_lner.client.ZMQRPCClient`
 
@@ -90,8 +88,8 @@ class ZMQRPCServer:
                        f"{', '.join([str(k)+'='+str(v) for k,v in kwargs.items()])})")
         self.named_call_signatures[call_name] = (obj_name, attr_name, args, kwargs)
 
-    def _call_by_name(self, call_name: str, args: list = None,
-                      kwargs: list = None):
+    def _call_by_name(self, call_name: str, args: list | None = None,
+                      kwargs: list | None = None):
         """Lookup a configured call by its `'call_name'`, call it with the
         specified args/kwargs, and return the result.
 
@@ -115,12 +113,11 @@ class ZMQRPCServer:
         # Update args & kwargs from their defaults for this call if specified.
         args = args + default_args[len(args):]
         kwargs = default_kwargs | kwargs
-        print(f"updated call: {obj_name}.{attr_name}, args={args}, kwargs={kwargs}")
         return self._call(obj_name=obj_name, attr_name=attr_name, args=args,
                           kwargs=kwargs)
 
-    def _call(self, obj_name: str, attr_name: str, args: list = None,
-              kwargs: list = None):
+    def _call(self, obj_name: str, attr_name: str, args: list | None = None,
+              kwargs: list | None = None):
         """Call the object attribute with the specified args/kwargs and return
         the result."""
         args = [] if args is None else args
