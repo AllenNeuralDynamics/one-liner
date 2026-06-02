@@ -8,6 +8,10 @@ docs_dir: docs
 theme:
   name: material
 
+markdown_extensions:
+  - admonition
+  - pymdownx.magiclink # For in-line references to functions/methods.
+
 plugins:
   - search
   - autorefs
@@ -18,10 +22,13 @@ plugins:
           paths:
             - src
           options:
+            filters:
+              - "!^__slots__$" # Omit slots
             show_root_heading: true
+            show_if_no_docstring: false
             show_source: false
             members_order: source
-            docstring_style: sphinx
+            docstring_style: numpy
 
 nav:
   - Home: index.md

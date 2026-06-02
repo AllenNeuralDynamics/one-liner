@@ -16,30 +16,38 @@ class RouterServer:
 
     def __init__(self, protocol: Protocol = "tcp", interface: str = "*",
                  rpc_port: str = "5555", broadcast_port: str = "5556",
-                 context: zmq.Context = None, instances: dict[str, Any] = None,
-                 config: dict[str, dict] = None):
-        """constructor.
+                 context: zmq.Context | None = None,
+                 instances: dict[str, Any] | None = None,
+                 config: dict[str, dict] | None = None):
+        """ Constructor.
 
-        :param protocol: a zmq supported protocol (tcp, inproc, etc)
-        :param interface:
-        :param rpc_port: port to issue remote procedure calls to python objects.
-        :param broadcast_port: port from which to stream periodic data.
-        :param context: the zmq context. Will be created automatically if
-            unspecified.
-        :param instances: dict of object instances, keyed by name
+        Parameters
+        ----------
+        protocol : str
+            A zmq supported protocol (tcp, inproc, etc).
+        interface : str, optional
+            The interface to bind or connect to.
+        rpc_port : int
+            Port to issue remote procedure calls to python objects.
+        broadcast_port : int
+            Port from which to stream periodic data.
+        context : zmq.Context
+            The zmq context. Will be created automatically if unspecified.
+        instances : dict
+            Dict of object instances, keyed by name.
 
-        .. warning::
-           For sharing data within the same process using the `inproc` protocol,
-           the zmq Context must be shared between
-           :py:class:`~one_liner.server.RouterServer` and
-           :py:class:`~one_liner.client.RouterClient`
-           (or :py:class:`~one_liner.server.RouterServer` and
-           :py:class:`~one_liner.server.RouterServer` if forwarding).
+        Warnings
+        --------
+        For sharing data within the same process using the `inproc` protocol,
+        the zmq Context must be shared between
+        [`RouterServer`][one_liner.server.RouterServer]
+        and [`RouterClient`][one_liner.client.RouterClient]
+        (or `RouterServer` and `RouterServer` if forwarding).
 
-        .. note::
-           For the `protocol` setting, some options are system-dependent (i.e:
-           `ipc` is for unix-like OSes only).
-
+        Notes
+        -----
+        For the `protocol` setting, some options are system-dependent
+        (i.e: `ipc` is for unix-like OSes only).
         """
         self.context = context or zmq.Context.instance()
         self._context_managed_externally = ((context is not None) or
@@ -65,50 +73,69 @@ class RouterServer:
     def run(self, block: bool = False):
         """Setup rpc listener and broadcaster.
 
-        :param block: if ``False`` (default), run the underlying blocking
-           calls in a thread and return immediately. Otherwise, run the streamer
-           in the current thread and block (i.e: do not return).
+        Parameters
+        ----------
+        block: if ``False``, run the underlying blocking calls in a thread and
+            return immediately. Otherwise, run the streamer in the current
+            thread and block (i.e: do not return).
         """
         self.rpc.run()
         self.streamer.run(run_in_thread=(not block))
 
     def add_named_call(self, call_name: str, obj_name: str, attr_name: str,
-                             args: list = None, kwargs: dict = None):
-        """Setup a call to be called with `call_by_name` on the
-        :py:class:`~one_lner.client.ZMQRPCClient`
+                       args: list | None = None, kwargs: dict | None = None):
+        """ Setup a call to be called with
+        [`call_by_name`][one_liner.client.RouterClient.call_by_name] on the
+        [`RouterClient`][one_liner.client.RouterClient].
 
-        :param call_name: string to save the function call signature under.
-        :param obj_name: underlying object instance name. Must be present in
-            the `objects` dict passed into the `__init__`.
-        :param attr_name: name of the callable attribute (method).
-        :param args: default args to save with the function call.
-        :param kwargs: default kwargs to save with the function call.
+        Parameters
+        ----------
+        call_name : str
+            String to save the function call signature under.
+        obj_name : str
+            Underlying object instance name. Must be present in the `objects`
+            dict passed into the `__init__`.
+        attr_name : str
+            Name of the callable attribute (method).
+        args : tuple
+            Default args to save with the function call.
+        kwargs : dict
+            Default kwargs to save with the function call.
 
-        .. note::
-           `args` and `kwargs` can be overwritten by index or name respectively
-           when actually calling the named function call with
-           :py:meth:`~one_liner.server.rpc_server.ZMQRPCServer.call_by_name.`
-
+        Notes
+        -----
+        `args` and `kwargs` can be overwritten by index or name respectively
+        when actually calling the named function call with
+        [`call_by_name`][one_liner.client.RouterClient.call_by_name].
         """
         return self.rpc.add_named_call(call_name=call_name, obj_name=obj_name,
                                        attr_name=attr_name, args=args,
                                        kwargs=kwargs)
 
     def add_stream(self, stream_name: str, frequency_hz: float, obj_name: str,
-                   attr_name: str, args: list = None, kwargs: dict = None,
-                   enabled: bool = True, serializer: Encoding | Callable = "pickle"):
+                   attr_name: str, args: list | None = None,
+                   kwargs: dict | None = None, enabled: bool = True,
+                   serializer: Encoding | Callable = "pickle"):
         """Create a stream from a callable object attribute in the instance dict.
 
-        :param name: stream name
-        :param frequency_hz: frequency at which to call the underlying function
-        :param obj_name: name of instance in the instances dict
-        :param attr_name: name of callable instance attribute (a method)
-        :param args: any function arguments
-        :param kwargs: any function keyword arguments
-        :param enabled: if true (default), start with the stream enabled.
-        :param serializer: callable function to serialize the data or string
-            representation of built-in serializer (or None if the data is
-            already serialized)
+        Parameters
+        ----------
+        stream_name:
+        frequency_hz:
+            frequency at which to call the underlying function
+        obj_name:
+            name of instance in the instances dict
+        attr_name:
+            name of callable instance attribute (a method)
+        args:
+            any function arguments
+        kwargs:
+            any function keyword arguments
+        enabled:
+            if true, start with the stream enabled.
+        serializer:
+            callable function to serialize the data or string representation of
+            built-in serializer (or None if the data is already serialized)
         """
         func = getattr(self.rpc.instances[obj_name], attr_name)
         self.streamer.add(name=stream_name, frequency_hz=frequency_hz,
@@ -120,34 +147,43 @@ class RouterServer:
                    func: Callable, args: list = None, kwargs: dict = None,
                    enabled: bool = True,
                    serializer: Encoding | Callable = "pickle"):
-        """Create a stream. i.e: Setup a function to be called with specific
-        arguments at a set frequency. If the function is already being
-        broadcasted, update the broadcast parameters.
 
-        :param name: stream name
-        :param frequency_hz: frequency at which to call the underlying function
-        :param func: function to call
-        :param args: any function arguments
-        :param kwargs: any function keyword arguments
-        :param enabled: if true (default), start with the stream enabled.
-        :param serializer: callable function to serialize the data or string
-            representation of built-in serializer (or None if the data is
-            already serialized)
+        """ Create a stream.
 
-        .. code-block:: python
+        i.e: Setup a function to be called with specific arguments at a set frequency.
+        If the function is already being broadcasted, update the broadcast parameters.
 
-           import cv2
+        Parameters
+        ----------
+        name : str
+            Stream name.
+        frequency_hz : float or int
+            Frequency at which to call the underlying function.
+        func : callable
+            Function to call.
+        args : tuple
+            Any function arguments.
+        kwargs : dict
+            Any function keyword arguments.
+        enabled : bool, default True
+            If true, start with the stream enabled.
+        serializer : callable or str, optional
+            Callable function to serialize the data or string representation of
+            built-in serializer (or None if the data is already serialized).
 
-           video = cv2.VideoCapture(0) # Get the first available camera.
-
-           def get_frame():
-             return video.read()[1] # just get the frame.
-
-           server = RouterServer()
-           server.add_stream("live_video", # name of the stream
-                             30,  # How fast to call this function.
-                             get_frame) # func to call.
-           server.run()
+        Examples
+        --------
+        >>> import cv2
+        >>> video = cv2.VideoCapture(0)  # Get the first available camera.
+        >>> def get_frame():
+        ...     return video.read()[1]  # just get the frame.
+        >>> server = RouterServer()
+        >>> server.add_stream(
+        ...     "live_video",  # name of the stream
+        ...     30,            # How fast to call this function.
+        ...     get_frame,     # func to call.
+        ... )
+        >>> server.run()
         """
         self.streamer.add(name=stream_name, frequency_hz=frequency_hz,
                           func=func, args=args, kwargs=kwargs,
@@ -156,62 +192,87 @@ class RouterServer:
     def add_zmq_stream(self, name: str, address: str, enabled: bool = True,
                        log_chatter: bool = False):
         """ Add a stream from an existing zmq PUB socket source (including
-        another existing :py:class:`~one_liner.server.RouterServer`).
+        another existing [`RouterServer`][one_liner.server.RouterServer].
 
-        :param name: stream name
-        :param address: zmq socket address: `{protocol}://{interface}:{port}`
-        :param enabled: if True (default) start enabled.
-        :param log_chatter: if True, intercept messages in the connected PUB
-           socket and add them to the logs (if the data length is short).
-
+        Parameters
+        ----------
+        name:
+            stream name
+        address:
+            zmq socket address: `{protocol}://{interface}:{port}`
+        enabled:
+            if `True`, start enabled.
+        log_chatter:
+            if `True`, intercept messages in the connected PUB
+            socket and add them to the logs (if the data length is short).
         """
         self.streamer.add_zmq_stream(name=name, address=address, enabled=enabled,
                                      log_chatter=log_chatter)
 
     def get_stream_fn(self, name: str, set_timestamp: bool = False,
                       serializer: Encoding | Callable = "pickle") -> Callable:
-        """Get a function to broadcast the specified stream name.
-        Useful if the application is creating data at its
-        own rate and needs a callback function to call upon producing new data.
+        """
+        Get a function to broadcast the specified stream name.
 
-        This implicitly adds a manual stream to the configuration.
+        Useful if the application is creating data at its own rate and needs
+        a callback function to call upon producing new data. This implicitly
+        adds a manual stream to the configuration.
 
-        :param name: stream name
-        :param serializer: callable function to serialize the data or string
-            representation of a built-in serializer.
-        :param set_timestamp: if true, return a function who's first argument is
-            the timestamp to be set for the packet.
+        Parameters
+        ----------
+        name : str
+            Stream name.
+        serializer : callable or str
+            Callable function to serialize the data or string representation of
+            a built-in serializer.
+        set_timestamp : bool
+            If true, return a function who's first argument is the timestamp
+            to be set for the packet.
 
-        .. code-block:: python
+        Returns
+        -------
+        callable
+            A broadcast function that accepts data to be streamed.
 
-           send_func = server.get_stream_fn("live_video_feed")
-           video = cv2.VideoCapture(0) # Connect to first available camera.
-
-           # Send images as soon as we can get them off the camera.
-           while True:
-               new_frame = video.read()[1] # Get new video frame
-               send_func(new_frame)
-
+        Examples
+        --------
+        >>> send_func = server.get_stream_fn("live_video_feed")
+        >>> video = cv2.VideoCapture(0)  # Connect to first available camera.
+        >>> # Send images as soon as we can get them off the camera.
+        >>> while True:
+        ...     new_frame = video.read()[1]  # Get new video frame
+        ...     send_func(new_frame)
         """
         return self.streamer.get_stream_fn(name, serializer=serializer,
                                            set_timestamp=set_timestamp)
 
     def enable_stream(self, name):
-        """Enable broadcasting of a stream by name. Any connected
-        :py:class:`~one_liner.client.RouterClient` will start receiving data
-        from this stream after they have configured how to buffer the stream
-        data with :py:meth:`~one_liner.client.RouterClient.configure_stream`.
+        """
+        Enable broadcasting of a stream by name.
 
-        :param name: stream name
-        :raises KeyError: if the stream name does not exist.
-        :raises ValueError: if the stream exists but cannot be enabled/disabled.
+        Any connected [`RouterClient`][one_liner.client.RouterClient] will start
+        receiving data from this stream after they have configured how to buffer
+        the stream  data with
+        [`configure_stream`][one_liner.client.RouterClient.configure_stream].
 
-        .. note::
-           Enabling streams only works for periodically-added streams
-           added with :py:meth:`~one_liner.server.RouterServer.add_stream` and
-           :py:meth:`~one_liner.server.RouterServer.add_zmq_stream` but
-           *not* :py:meth:`~one_liner.server.RouterServer.get_stream_fn`.
+        Parameters
+        ----------
+        name : str
+            Stream name.
 
+        Raises
+        ------
+        KeyError
+            If the stream name does not exist.
+        ValueError
+            If the stream exists but cannot be enabled/disabled.
+
+        Notes
+        -----
+        Enabling streams only works for periodically-added streams added with
+        [`add_stream`][one_liner.server.RouterServer.add_stream] and
+        [`add_zmq_stream`][one_liner.server.RouterServer.add_zmq_stream] but
+        *not* [`get_stream_fn`][one_liner.server.RouterServer.get_stream_fn].
         """
         return self.streamer.enable(name)
 
@@ -220,12 +281,14 @@ class RouterServer:
         return self.streamer.disable(name)
 
     def remove_stream(self, name: str):
-        """Remove an existing stream. The stream must be re-added if needed
-        later. Consider using
-        :py:meth:`~one_liner.server.RouterServer.enable_stream` and
-        :py:meth:`~one_liner.server.RouterServer.disable_stream` instead if you
-        need to conditionally throttle whether a stream is sending data.
+        """
+        Remove an existing stream.
 
+        The stream must be re-added if needed later. Consider using
+        [`enable_stream`][one_liner.server.RouterServer.enable_stream] and
+        [`disable_stream`][one_liner.server.RouterServer.disable_stream]
+        instead if you need to conditionally throttle whether a stream is
+        sending data.
         """
         self.streamer.remove(name)
 
