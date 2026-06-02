@@ -145,6 +145,9 @@ jobs:
     - uses: astral-sh/setup-uv@v5
       with:
         enable-cache: true
+           
+    - name: Install dependencies
+      run: uv sync --group docs
 
     - name: Build docs
       run: uv run mkdocs build
