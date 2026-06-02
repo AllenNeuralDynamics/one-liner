@@ -113,7 +113,6 @@ class ZMQRPCServer:
         # Update args & kwargs from their defaults for this call if specified.
         args = args + default_args[len(args):]
         kwargs = default_kwargs | kwargs
-        print(f"updated call: {obj_name}.{attr_name}, args={args}, kwargs={kwargs}")
         return self._call(obj_name=obj_name, attr_name=attr_name, args=args,
                           kwargs=kwargs)
 
