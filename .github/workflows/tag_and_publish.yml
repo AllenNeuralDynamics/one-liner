@@ -11,7 +11,7 @@ on:
 
 jobs: 
   extract_info:
-    runs-on: eng-tools
+    runs-on: ubuntu-latest
     outputs:
       project_name: ${{ steps.get_info.outputs.PACKAGE_NAME }}
       project_version: ${{ steps.get_info.outputs.PACKAGE_VERSION }}
@@ -42,7 +42,7 @@ jobs:
   tag:
     needs: extract_info
     if: needs.extract_info.outputs.tag_already_exists == 'false'
-    runs-on: eng-tools
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
     - uses: astral-sh/setup-uv@v5
@@ -126,7 +126,7 @@ jobs:
   
   build-docs:
     needs: extract_info
-    runs-on: eng-tools
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
