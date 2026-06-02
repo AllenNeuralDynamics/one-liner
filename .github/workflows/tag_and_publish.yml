@@ -147,7 +147,7 @@ jobs:
         enable-cache: true
 
     - name: Build docs
-      run: make docs
+      run: uv run mkdocs build
 
     - name: Upload artifact
       uses: actions/upload-pages-artifact@v3
