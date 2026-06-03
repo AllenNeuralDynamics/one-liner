@@ -111,7 +111,7 @@ pip install -e .[examples]
 In the PC acting as the server:
 ```python
 from one_liner.server import RouterServer
-from threading import Event
+from time import sleep
 
 class Horn:
   def beep(self):
@@ -123,7 +123,7 @@ server = RouterServer(instances={"my_horn": my_horn})
 server.run()
 
 while True: # Nothing to do! Object control happens in another thread.
-    Event().wait() # or time.sleep(SHORT_DELAY)
+    time.sleep(0.001)
 ```
 
 In the PC acting as the client:
@@ -131,7 +131,7 @@ In the PC acting as the client:
 from one_liner.client import RouterClient
 
 client = RouterClient()
-result = client.call("my_horn", "beep") # call a func/method w/ args & kwargs; return the result.
+result = client.call("my_horn", "beep") # call method w/ args & kwargs; return the result.
 ```
 
 ### Streaming Data
@@ -152,7 +152,7 @@ server = RouterServer()
 server.add_stream_from_callable("live_video", # name of the stream
                                 30,  # How fast to call this function.
                                 get_frame) # function to call.
-server.run(run_in_thread=False)  # block, but we can not-block if set to True. That's it!
+server.run(block=True)  # if block=False, run in an internal thread. That's it!
 ```
 
 In the PC acting as the client:

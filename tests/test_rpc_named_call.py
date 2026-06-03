@@ -28,10 +28,10 @@ def test_many_client_receive():
     server.run()
 
     server.add_named_call("get_sensor0", "test_sensor_array", "get_data", args=[0])
-    data = client.call_by_name("get_sensor0")
+    _, data = client.call_by_name("get_sensor0") # omit timestamp
     assert 0 in data
     # Ensure we can override args.
-    data_from_sensor1 = client.call_by_name("get_sensor0", args=[1])
+    _, data_from_sensor1 = client.call_by_name("get_sensor0", args=[1])
     assert 1 in data_from_sensor1
     # Ensure this throws an exception: we already specified sensor_index as an arg.
     with pytest.raises(RPCException):
