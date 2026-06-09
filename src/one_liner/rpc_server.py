@@ -113,8 +113,6 @@ class ZMQRPCServer:
         # Update args & kwargs from their defaults for this call if specified.
         args = args + default_args[len(args):]
         kwargs = default_kwargs | kwargs
-        # TODO: better error checking here such that kwargs cannot override
-        # pre-specified args.
         debug_msg = (f"Invoking named call: {obj_name}.{attr_name}("
                      f"{', '.join([str(a) for a in args])}"
                      f"{', ' if (len(args) and len(kwargs)) else ''}"
