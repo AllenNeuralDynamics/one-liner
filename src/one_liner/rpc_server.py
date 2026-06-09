@@ -61,8 +61,8 @@ class ZMQRPCServer:
                 _send(self.socket, name="", data=str(e), success=False)
 
     def add_named_call(self, call_name: str,
-                             obj_name: str, attr_name: str,
-                             args: list | None = None, kwargs: list | None = None):
+                       obj_name: str, attr_name: str,
+                       args: list | None = None, kwargs: list | None = None):
         """Setup a call to be called with `call_by_name` on the
         :py:class:`~one_lner.client.ZMQRPCClient`
 
@@ -89,7 +89,7 @@ class ZMQRPCServer:
         self.named_call_signatures[call_name] = (obj_name, attr_name, args, kwargs)
 
     def _call_by_name(self, call_name: str, args: list | None = None,
-                      kwargs: list | None = None):
+                      kwargs: dict | None = None):
         """Lookup a configured call by its `'call_name'`, call it with the
         specified args/kwargs, and return the result.
 
@@ -113,6 +113,13 @@ class ZMQRPCServer:
         # Update args & kwargs from their defaults for this call if specified.
         args = args + default_args[len(args):]
         kwargs = default_kwargs | kwargs
+        # TODO: better error checking here such that kwargs cannot override
+        # pre-specified args.
+        debug_msg = (f"Invoking named call: {obj_name}.{attr_name}("
+                     f"{', '.join([str(a) for a in args])}"
+                     f"{', ' if (len(args) and len(kwargs)) else ''}"
+                     f"{', '.join([str(k) + '=' + str(v) for k, v in kwargs.items()])})")
+        self.log.debug(debug_msg)
         return self._call(obj_name=obj_name, attr_name=attr_name, args=args,
                           kwargs=kwargs)
 
@@ -135,6 +142,11 @@ class ZMQRPCServer:
             self.log.error(error_msg)
             raise AttributeError(error_msg) from e
         try:
+            debug_msg = (f"Calling: {obj_name}.{attr_name}("
+                         f"{', '.join([str(a) for a in args])}"
+                         f"{', ' if (len(args) and len(kwargs)) else ''}"
+                         f"{', '.join([str(k) + '=' + str(v) for k, v in kwargs.items()])})")
+            self.log.debug(debug_msg)
             return func(*args, **kwargs)
         except Exception as e:  # catch-all error calling the function.
             error_msg = (f"func: {obj_name}.{attr_name}("
