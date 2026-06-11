@@ -6,6 +6,7 @@ from one_liner.stream_server import ZMQStreamServer
 from one_liner.rpc_server import ZMQRPCServer
 from one_liner.utils import Protocol, Encoding
 from typing import Any, Callable
+from one_liner.models import RouterServerAPI
 
 
 class RouterServer:
@@ -18,7 +19,7 @@ class RouterServer:
                  rpc_port: str = "5555", broadcast_port: str = "5556",
                  context: zmq.Context | None = None,
                  instances: dict[str, Any] | None = None,
-                 config: dict[str, dict] | None = None):
+                 config: RouterServerAPI | dict[str, dict] | None = None):
         """ Constructor.
 
         Parameters
@@ -62,13 +63,15 @@ class RouterServer:
         self.rpc = ZMQRPCServer(protocol=protocol, interface=interface,
                                 port=rpc_port, context=self.context,
                                 instances=self.instances)
-        if not config:
+        if config is None:
             return
+        if not isinstance(config, RouterServerAPI):
+            config = RouterServerAPI(**config)  # will also validate.
         # Construct any streams or named calls from config spec.
-        for name, specs in config.get("periodic_streams", {}).items():
-            self.add_stream(stream_name=name, **specs)
-        for name, specs in config.get("named_calls", {}).items():
-            self.add_named_call(call_name=name, **specs)
+        for name, specs in config.periodic_streams.items():
+            self.add_stream(stream_name=name, **specs.model_dump())
+        for name, specs in config.named_calls.items():
+            self.add_named_call(call_name=name, **specs.model_dump())
 
     def run(self, block: bool = False):
         """Setup rpc listener and broadcaster.
