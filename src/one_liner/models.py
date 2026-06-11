@@ -1,5 +1,5 @@
 """RouterServerAPI Pydantic Model for creating a RouterServer from a dict"""
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Any, Optional
 
 
@@ -15,5 +15,5 @@ class NamedCall(BaseModel):
     kwargs: Optional[dict[str, Any]] = None
 
 class RouterServerAPI(BaseModel):
-    periodic_streams: dict[str, PeriodicStream]
-    named_calls: dict[str, NamedCall]
+    periodic_streams: dict[str, PeriodicStream] = {}
+    named_calls: dict[str, NamedCall] = {}
