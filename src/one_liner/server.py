@@ -65,7 +65,7 @@ class RouterServer:
                                 instances=self.instances)
         if config is None:
             return
-        if isinstance(config, RouterServerAPI):
+        if not isinstance(config, RouterServerAPI):
             config = RouterServerAPI(**config)  # will also validate.
         # Construct any streams or named calls from config spec.
         for name, specs in config.periodic_streams.items():
