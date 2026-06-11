@@ -63,9 +63,9 @@ class RouterServer:
         self.rpc = ZMQRPCServer(protocol=protocol, interface=interface,
                                 port=rpc_port, context=self.context,
                                 instances=self.instances)
-        if not config:
+        if config is None:
             return
-        if type(config) is not RouterServerAPI:
+        if isinstance(config, RouterServerAPI):
             config = RouterServerAPI(**config)  # will also validate.
         # Construct any streams or named calls from config spec.
         for name, specs in config.periodic_streams.items():
