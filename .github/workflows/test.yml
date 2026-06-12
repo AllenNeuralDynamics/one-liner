@@ -1,0 +1,14 @@
+name: Test
+on:
+  workflow_call:
+  pull_request:
+    branches:
+      - main
+      - dev
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  test:
+    uses: AllenNeuralDynamics/.github/.github/workflows/test.yml@main
+    with:
+      runner_label: 'ubuntu-latest'
