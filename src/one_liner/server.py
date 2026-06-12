@@ -6,7 +6,7 @@ from one_liner.stream_server import ZMQStreamServer
 from one_liner.rpc_server import ZMQRPCServer
 from one_liner.utils import Protocol, Encoding
 from typing import Any, Callable
-from one_liner.models import RouterServerAPI
+from one_liner.models import RouterServerConfig
 
 
 class RouterServer:
@@ -19,7 +19,7 @@ class RouterServer:
                  rpc_port: str = "5555", broadcast_port: str = "5556",
                  context: zmq.Context | None = None,
                  instances: dict[str, Any] | None = None,
-                 config: RouterServerAPI | dict[str, dict] | None = None):
+                 config: RouterServerConfig | dict[str, dict] | None = None):
         """ Constructor.
 
         Parameters
@@ -65,8 +65,8 @@ class RouterServer:
                                 instances=self.instances)
         if config is None:
             return
-        if not isinstance(config, RouterServerAPI):
-            config = RouterServerAPI(**config)  # will also validate.
+        if not isinstance(config, RouterServerConfig):
+            config = RouterServerConfig(**config)  # will also validate.
         # Construct any streams or named calls from config spec.
         for name, specs in config.periodic_streams.items():
             self.add_stream(stream_name=name, **specs.model_dump())
