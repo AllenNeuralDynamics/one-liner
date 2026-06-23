@@ -69,7 +69,7 @@ class BoogieWave(BaseModel):
 # Stream with model as return type
 def boogie_wave(
     frequency_hz, phase_shift: float = 0, motto: str = "Let Dance!"
-) -> float:
+) -> BoogieWave:
     return BoogieWave(
         sin_wave=sin(2 * pi * frequency_hz * perf_counter() + phase_shift), motto=motto
     )

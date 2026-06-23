@@ -1,7 +1,8 @@
+import inspect
 import logging
 import zmq
 from one_liner.stream_schema import Stream, PeriodicStream, Streams
-from one_liner.utils import Encoding, Protocol, _send
+from one_liner.utils import Encoding, Protocol, _send, get_func_sig_json_schema
 from threading import Event, Lock, Thread
 from time import sleep
 from typing import Callable, get_type_hints
@@ -391,11 +392,16 @@ class ZMQStreamServer:
         """
         manual_streams = {n: Stream(encoding=str(self._manual_broadcast_encodings[n]))
                           for n in self._manual_broadcast_sockets.keys()}
-        periodic_streams = {n: PeriodicStream(encoding=str(self._call_encodings[n]),
-                                              return_type=self._get_return_type(n),
-                                              frequency_hz=self._call_frequencies[n],
-                                              enabled=self._call_enabled[n])
-                            for n in self._call_signature.keys()}
+        periodic_streams = {}
+        for n in self._call_signature.keys():
+            signature = inspect.signature(self._call_signature[n][0])
+            params_schema, return_schema = get_func_sig_json_schema(signature).values()
+            periodic_streams[n] = PeriodicStream(
+                encoding=str(self._call_encodings[n]),
+                frequency_hz=self._call_frequencies[n],
+                params_schema=params_schema,
+                return_schema=return_schema,
+                enabled=self._call_enabled[n])
         # FIXME: how do we get the encoding for received arbitrary zmq data?
         zmq_streams = {n: Stream(encoding="unspecified") for n in self._zmq_streams}
         streams = Streams(manual_streams=manual_streams,

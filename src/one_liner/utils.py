@@ -1,7 +1,9 @@
+import inspect
 import orjson
 import struct
 import pickle
 import zmq
+from pydantic import TypeAdapter
 from time import perf_counter as now
 from typing import Any, Literal, Callable, Tuple
 
@@ -85,6 +87,27 @@ def _recv(socket: zmq.Context.socket, flag: zmq.Flag = 0, prefix: str | None = N
     success, timestamp = pickle.loads(raw_bytes[prefix_len + 2:])
     data = deserialize_fn(raw_bytes[prefix_len + 2 + metadata_num_bytes:])
     return success, timestamp, data
+
+
+def get_func_sig_json_schema(signature: inspect.Signature) -> dict:
+    params_schema = {}
+    for param_name, param in signature.parameters.items():
+        if param_name == "self":
+            continue
+        annotation = param.annotation
+        if annotation is inspect.Parameter.empty:
+            # Default schema - jsonschema doesn't have "Any"
+            params_schema[param_name] = {"type": "string"}
+        else:
+            params_schema[param_name] = TypeAdapter(annotation).json_schema()
+
+    return_annotation = signature.return_annotation
+    if return_annotation is inspect.Signature.empty or return_annotation is None:
+        # Default schema for no return type"
+        return_schema = {"type": "null"}
+    else:
+        return_schema = TypeAdapter(return_annotation).json_schema()
+    return {"params": params_schema, "return": return_schema}
 
 
 class RPCException(Exception):

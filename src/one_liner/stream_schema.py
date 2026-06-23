@@ -9,7 +9,8 @@ class Stream(BaseModel):
 
 
 class PeriodicStream(Stream):
-    return_type: str | None  # None indicates unspecified whereas "None" means it returns None
+    params_schema: Optional[dict] = None
+    return_schema: Optional[dict] = None
     frequency_hz: float
     enabled: bool
 
