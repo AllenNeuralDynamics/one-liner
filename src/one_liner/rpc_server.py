@@ -1,9 +1,12 @@
+import inspect
 import logging
 import pickle
 from ftplib import error_reply
 
 import zmq
 from one_liner.utils import _send, Protocol
+from one_liner.rpc_schema import RPC
+from pydantic import TypeAdapter
 from threading import Thread, Event
 from typing import Any
 
@@ -59,6 +62,52 @@ class ZMQRPCServer:
                 _send(self.socket, name="", data=reply, success=True)
             except Exception as e:
                 _send(self.socket, name="", data=str(e), success=False)
+
+    def _get_rpc_from_named_calls(self, name_call: tuple) -> RPC:
+        """
+        Extract RPC information from the named_call_signature. Extracts parameters and return types 
+        from the underlying function
+        """
+
+        obj_name, attr_name, args, kwargs = name_call
+        func = getattr(self.instances[obj_name], attr_name)
+        signature = inspect.signature(func)
+
+        params_schema = {}
+        for param_name, param in signature.parameters.items():
+            if param_name == "self": 
+                continue
+            annotation = param.annotation
+            if annotation is inspect.Parameter.empty:
+                # Default schema - jsonschema doesn't have "Any"
+                params_schema[param_name] = {"type": "string"} 
+            else:
+                params_schema[param_name] = TypeAdapter(annotation).json_schema()
+        
+        return_annotation = signature.return_annotation
+        if return_annotation is inspect.Signature.empty or return_annotation is None:
+            # Default schema for no return type"
+            return_schema = {"type": "null"}
+        else:
+            return_schema = TypeAdapter(return_annotation).json_schema()
+
+        return RPC(
+            instance=obj_name,
+            params_schema=params_schema,
+            return_schema=[return_schema]
+        )
+
+    def get_configuration(self, as_dict: bool) -> dict[str, RPC | dict]:
+        """
+        Get a breakdown of every RPC with its corresponding function signature.
+        """
+        configuration = {}
+        for n in self.named_call_signatures:
+            rpc = self._get_rpc_from_named_calls(self.named_call_signatures[n]) 
+            configuration[n] = rpc.model_dump() if as_dict else rpc
+
+        return configuration
+
 
     def add_named_call(self, call_name: str,
                        obj_name: str, attr_name: str,

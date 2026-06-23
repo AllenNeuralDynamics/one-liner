@@ -237,6 +237,10 @@ class RouterClient:
         return self.rpc_client.call("__streamer", "get_configuration",
                                     kwargs={"as_dict": as_dict})
 
+    def get_rpc_configurations(self, as_dict: bool = False) -> dict:
+        """Get the configuration for all RPCs."""
+        return self.rpc_client.call("__router_server", "get_rpc", args=[as_dict])
+
     @property
     def version(self):
         """Return client version."""
