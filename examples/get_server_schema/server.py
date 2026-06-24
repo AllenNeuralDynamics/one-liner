@@ -26,16 +26,15 @@ SAMPLE_RATES_HZ = [
 ################################################################################
 
 
-class HairType(Enum):
-    STRAIGHT = "straight"
-    WAVY = "wavy"
-    CURLY = "curly"
-    AFRO = "afro"
+class DanceMoves(Enum):
+    MOONWALK = "moonwalk"
+    ROBOT = "robot"
+    SALSA = "salsa"
 
 
 class Dancer(BaseModel):
-    hair_type: HairType
-    dance_moves: list[str]
+    name: str
+    moves: list[DanceMoves]
 
 
 class DiscoDevice:
@@ -43,8 +42,10 @@ class DiscoDevice:
         self.tune = "Funky Town"
 
     # Example with custom type parameters and custom return type
-    def get_dancer(self, hair_type: HairType = HairType.STRAIGHT) -> Dancer:
-        return Dancer(hair_type=hair_type, dance_moves=["moonwalk", "robot", "salsa"])
+    def get_dancer(
+        self, name: str = "John Doe", moves: list[DanceMoves] = []
+    ) -> Dancer:
+        return Dancer(name=name, moves=moves)
 
     # Example with multiple return types
     def change_tune(self, tune: str) -> str | int:
@@ -94,9 +95,12 @@ if __name__ == "__main__":
     server = RouterServer(instances={"disco_device": disco_device})
 
     # Add RPCs
-    server.add_named_call("get_dancer", "disco_device", "get_dancer", args=[HairType.CURLY])
-    server.add_named_call("change_tune", "disco_device", "change_tune", args=["Boogie Wonderland"])
-
+    server.add_named_call(
+        "get_dancer", "disco_device", "get_dancer", args=["John Doe", [DanceMoves.MOONWALK]]
+    )
+    server.add_named_call(
+        "change_tune", "disco_device", "change_tune", args=["Boogie Wonderland"]
+    )
 
     # Add Streams
     for i in range(NUM_STREAMS):  # Create a few streams
@@ -110,7 +114,9 @@ if __name__ == "__main__":
         )
 
     for i in range(NUM_STREAMS):  # Create a few streams
-        print(f"Adding broadcast: 1hz_boogie_wave[{i}] sampled at {SAMPLE_RATES_HZ[i]} Hz")
+        print(
+            f"Adding broadcast: 1hz_boogie_wave[{i}] sampled at {SAMPLE_RATES_HZ[i]} Hz"
+        )
         # Set sample and signal rates.
         server.add_stream_from_callable(
             f"1hz_boogie_wave[{i}]",
