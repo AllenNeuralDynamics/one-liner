@@ -7,7 +7,7 @@ from one_liner.rpc_server import ZMQRPCServer
 from one_liner.utils import Protocol, Encoding
 from typing import Any, Callable
 from one_liner.models import RouterServerConfig
-from one_liner.rpc_schema import RPC
+from one_liner.socket_metadata_schema import RPC
 
 
 class RouterServer:

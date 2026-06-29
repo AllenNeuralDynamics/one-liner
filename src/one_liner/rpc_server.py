@@ -1,11 +1,10 @@
-import inspect
 import logging
 import pickle
 from ftplib import error_reply
 
 import zmq
 from one_liner.utils import _send, Protocol, get_func_sig_json_schema
-from one_liner.rpc_schema import RPC
+from one_liner.socket_metadata_schema import RPC
 from threading import Thread, Event
 from typing import Any
 
@@ -70,13 +69,13 @@ class ZMQRPCServer:
 
         obj_name, attr_name, args, kwargs = name_call
         func = getattr(self.instances[obj_name], attr_name)
-        signature = inspect.signature(func)
-        params_schema, return_schema = get_func_sig_json_schema(signature).values()
+        params_schema, return_schema, description = get_func_sig_json_schema(func).values()
 
         return RPC(
             instance=obj_name,
             params_schema=params_schema,
-            return_schema=return_schema
+            return_schema=return_schema,
+            description=description
         )
 
     def get_configuration(self, as_dict: bool) -> dict[str, RPC | dict]:

@@ -44,11 +44,33 @@ class DiscoDevice:
     # Example with custom type parameters and custom return type
     def get_dancer(
         self, name: str = "John Doe", moves: list[DanceMoves] = []
-    ) -> Dancer:
-        return Dancer(name=name, moves=moves)
+    ) -> dict:
+        """
+        Get a groovy dancer to dance to some tunes.
+
+        Parameters
+        ----------
+        name : str
+            The name of the dancer.
+        moves : list[DanceMoves]
+            The dance moves the dancer can perform.
+
+        Returns
+        ------- 
+        dict
+            A dictionary representation of the dancer.
+
+        Examples
+        --------
+        >>> disco_device = DiscoDevice()
+        >>> disco_device.get_dancer(name="Jane Doe", moves=[DanceMoves.MOONWALK, DanceMoves.ROBOT])
+        {'name': 'Jane Doe', 'moves': ['moonwalk', 'robot']}
+        """
+        return Dancer(name=name, moves=moves).model_dump()
 
     # Example with multiple return types
     def change_tune(self, tune: str) -> str | int:
+        """Change the tune of the disco device. Returns 1 if the tune is "Boogie Wonderland"."""
         self.tune = tune
         if self.tune == "Boogie Wonderland":
             return 1
@@ -96,10 +118,14 @@ if __name__ == "__main__":
 
     # Add RPCs
     server.add_named_call(
-        "get_dancer", "disco_device", "get_dancer", args=["John Doe", [DanceMoves.MOONWALK]]
+        "get_dancer",
+        "disco_device",
+        "get_dancer",
     )
     server.add_named_call(
-        "change_tune", "disco_device", "change_tune", args=["Boogie Wonderland"]
+        "change_tune",
+        "disco_device",
+        "change_tune",
     )
 
     # Add Streams

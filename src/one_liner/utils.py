@@ -89,7 +89,8 @@ def _recv(socket: zmq.Context.socket, flag: zmq.Flag = 0, prefix: str | None = N
     return success, timestamp, data
 
 
-def get_func_sig_json_schema(signature: inspect.Signature) -> dict:
+def get_func_sig_json_schema(func: Callable) -> dict:
+    signature = inspect.signature(func)
     params_schema = {}
     for param_name, param in signature.parameters.items():
         if param_name == "self":
@@ -107,7 +108,8 @@ def get_func_sig_json_schema(signature: inspect.Signature) -> dict:
         return_schema = {"type": "null"}
     else:
         return_schema = TypeAdapter(return_annotation).json_schema()
-    return {"params": params_schema, "return": return_schema}
+    return {"params": params_schema, "return": return_schema,
+            "description": inspect.getdoc(func)}
 
 
 class RPCException(Exception):
