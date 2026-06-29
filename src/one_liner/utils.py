@@ -1,4 +1,5 @@
 import inspect
+import jsonref
 import orjson
 import struct
 import pickle
@@ -90,6 +91,18 @@ def _recv(socket: zmq.Context.socket, flag: zmq.Flag = 0, prefix: str | None = N
 
 
 def get_func_sig_json_schema(func: Callable) -> dict:
+    """
+    Get the JSON schema for the parameters and return type of a function as well 
+    as the docstring description. 
+    
+    NOTE: utilizes jsonref library to resolve any $ref references in the schema. 
+    Since each schema is generated from its own function signature, there aren't
+    any shared references between schemas, so this is a safe operation. 
+    Plus this simplifies converting schemas -> models. 
+    Pydantic may support this natively in the future according to these issues: 
+    https://github.com/pydantic/pydantic/issues/889
+    https://github.com/pydantic/pydantic/issues/12023
+    """
     signature = inspect.signature(func)
     params_schema = {}
     for param_name, param in signature.parameters.items():
@@ -100,14 +113,14 @@ def get_func_sig_json_schema(func: Callable) -> dict:
             # Default schema - jsonschema doesn't have "Any"
             params_schema[param_name] = {"type": "string"}
         else:
-            params_schema[param_name] = TypeAdapter(annotation).json_schema()
+            params_schema[param_name] = jsonref.replace_refs(TypeAdapter(annotation).json_schema())
 
     return_annotation = signature.return_annotation
     if return_annotation is inspect.Signature.empty or return_annotation is None:
         # Default schema for no return type"
         return_schema = {"type": "null"}
     else:
-        return_schema = TypeAdapter(return_annotation).json_schema()
+        return_schema = jsonref.replace_refs(TypeAdapter(return_annotation).json_schema())
     return {"params": params_schema, "return": return_schema,
             "description": inspect.getdoc(func)}
 
