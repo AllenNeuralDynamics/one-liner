@@ -28,7 +28,7 @@ SAMPLE_RATES_HZ = [
 
 class DanceMoves(Enum):
     MOONWALK = "moonwalk"
-    ROBOT = "robot"
+    ROBOT = 123
     SALSA = "salsa"
 
 
@@ -42,9 +42,7 @@ class DiscoDevice:
         self.tune = "Funky Town"
 
     # Example with custom type parameters and custom return type
-    def get_dancer(
-        self, name: str = "John Doe", moves: list[DanceMoves] = []
-    ) -> dict:
+    def get_dancer(self, name: str = "John Doe", moves: list[DanceMoves] = []) -> dict:
         """
         Get a groovy dancer to dance to some tunes.
 
@@ -56,7 +54,7 @@ class DiscoDevice:
             The dance moves the dancer can perform.
 
         Returns
-        ------- 
+        -------
         dict
             A dictionary representation of the dancer.
 
@@ -75,6 +73,9 @@ class DiscoDevice:
         if self.tune == "Boogie Wonderland":
             return 1
         return self.tune
+
+    def no_annotation(self, test: None):
+        return "what do I even do: " + str(test)
 
 
 ################################################################################
@@ -126,6 +127,11 @@ if __name__ == "__main__":
         "change_tune",
         "disco_device",
         "change_tune",
+    )
+    server.add_named_call(
+        "no_annotation",
+        "disco_device",
+        "no_annotation",
     )
 
     # Add Streams

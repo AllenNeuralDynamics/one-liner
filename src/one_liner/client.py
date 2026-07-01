@@ -3,7 +3,7 @@
 import logging
 import pickle
 import zmq
-from one_liner.stream_schema import Streams
+from one_liner.socket_metadata_schema import Streams
 from one_liner import __version__ as local_version
 from one_liner.utils import Protocol, Encoding, RPCException, StreamException, DESERIALIZERS, _recv
 from typing import Any, Callable, Literal, Tuple

@@ -1,10 +1,9 @@
 import inspect
-import jsonref
 import orjson
 import struct
 import pickle
 import zmq
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, create_model, Field
 from time import perf_counter as now
 from typing import Any, Literal, Callable, Tuple
 
@@ -103,24 +102,32 @@ def get_func_sig_json_schema(func: Callable) -> dict:
     https://github.com/pydantic/pydantic/issues/889
     https://github.com/pydantic/pydantic/issues/12023
     """
+    # Parameters schema
+    # -----------------
     signature = inspect.signature(func)
-    params_schema = {}
+    fields = {}
     for param_name, param in signature.parameters.items():
         if param_name == "self":
             continue
         annotation = param.annotation
+        default = param.default if param.default is not inspect.Parameter.empty else ...
         if annotation is inspect.Parameter.empty:
-            # Default schema - jsonschema doesn't have "Any"
-            params_schema[param_name] = {"type": "string"}
+            fields[param_name] = (Any, Field(default, description="Type unspecified — provide a value."))
         else:
-            params_schema[param_name] = jsonref.replace_refs(TypeAdapter(annotation).json_schema())
+            fields[param_name] = (annotation, default)
+    # Build pydantic model with per-parameter fields with default values and `required`. 
+    params_model = create_model(f"{func.__name__}_params", **fields)
+    params_schema = params_model.model_json_schema()
 
+    # Return type schema
+    # ------------------
     return_annotation = signature.return_annotation
     if return_annotation is inspect.Signature.empty or return_annotation is None:
         # Default schema for no return type"
-        return_schema = {"type": "null"}
+        return_schema = {}
     else:
-        return_schema = jsonref.replace_refs(TypeAdapter(return_annotation).json_schema())
+        return_schema = TypeAdapter(return_annotation).json_schema()
+
     return {"params": params_schema, "return": return_schema,
             "description": inspect.getdoc(func)}
 
