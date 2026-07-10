@@ -152,3 +152,55 @@ def test_annotated_stream_yields_schema():
 
     server.close()
     client.close()
+
+
+################################################################################
+#
+#   DEFAULT ARGS / KWARGS TESTS
+#
+#   When add_named_call is given `args` and/or `kwargs`, the matching parameters
+#   should be optional in the generated JSON schema, with the default value as
+#   the schema `default`.
+#
+################################################################################
+
+
+@pytest.fixture
+def rpc_configs_with_defaults():
+    server = RouterServer(instances={"test_rpc": RPCClass()})
+    client = RouterClient()
+    server.run()
+    server.add_named_call("with_args", "test_rpc", "rpc_annotated", args=[10])
+    server.add_named_call(
+        "with_kwargs", "test_rpc", "rpc_annotated", kwargs={"input": 10}
+    )
+    server.add_named_call(
+        "with_both", "test_rpc", "rpc_annotated", args=[10], kwargs={"input": 11}
+    )
+    try:
+        _, data = client.get_rpc_configurations()
+        yield data
+    finally:
+        server.close()
+        client.close()
+
+
+def test_default_args_make_param_optional(rpc_configs_with_defaults):
+    """Check default value is set for parameter when args is provided in add_named_call"""
+    schema = rpc_configs_with_defaults["with_args"].params_schema
+    assert "input" not in schema.get("required", [])
+    assert schema["properties"]["input"]["default"] == 10
+
+
+def test_default_kwargs_make_param_optional(rpc_configs_with_defaults):
+    """Check default value is set for parameter when kwargs is provided in add_named_call"""
+    schema = rpc_configs_with_defaults["with_kwargs"].params_schema
+    assert "input" not in schema.get("required", [])
+    assert schema["properties"]["input"]["default"] == 10
+
+
+def test_default_args_override_default_kwargs(rpc_configs_with_defaults):
+    """When args and kwargs provided, use args as the default value"""
+    schema = rpc_configs_with_defaults["with_both"].params_schema
+    assert "input" not in schema.get("required", [])
+    assert schema["properties"]["input"]["default"] == 10

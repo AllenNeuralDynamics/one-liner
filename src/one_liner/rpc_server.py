@@ -1,3 +1,4 @@
+import inspect
 import logging
 import pickle
 from ftplib import error_reply
@@ -69,7 +70,8 @@ class ZMQRPCServer:
 
         obj_name, attr_name, args, kwargs = name_call
         func = getattr(self.instances[obj_name], attr_name)
-        params_schema, return_schema, description = get_func_sig_json_schema(func).values()
+        params_schema, return_schema, description = get_func_sig_json_schema(
+            func, default_args=args, default_kwargs=kwargs).values()
 
         return RPC(
             instance=obj_name,
@@ -140,9 +142,20 @@ class ZMQRPCServer:
             raise KeyError(f"'{call_name}' is not a named call.")
         obj_name, attr_name, default_args, default_kwargs = \
             self.named_call_signatures[call_name]
-        # Update args & kwargs from their defaults for this call if specified.
-        args = args + default_args[len(args):]
+        
+        try: 
+            func = getattr(self.instances[obj_name], attr_name)
+            parameter_names = list(inspect.signature(func).parameters.keys())
+        except (KeyError, AttributeError, TypeError, ValueError):
+            parameter_names = []
+
+        args = args + default_args[len(args):]  
         kwargs = default_kwargs | kwargs
+        # Remove any kwargs that are already in args by index
+        # args have higher priority than kwargs
+        for i in range(len(args)): 
+            if i < len(parameter_names) and parameter_names[i] in kwargs:
+                del kwargs[parameter_names[i]]  
         debug_msg = (f"Invoking named call: {obj_name}.{attr_name}("
                      f"{', '.join([str(a) for a in args])}"
                      f"{', ' if (len(args) and len(kwargs)) else ''}"

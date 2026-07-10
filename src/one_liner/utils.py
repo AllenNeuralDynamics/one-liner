@@ -89,7 +89,8 @@ def _recv(socket: zmq.Context.socket, flag: zmq.Flag = 0, prefix: str | None = N
     return success, timestamp, data
 
 
-def get_func_sig_json_schema(func: Callable) -> dict:
+def get_func_sig_json_schema(func: Callable, default_args: list = [], 
+                             default_kwargs: dict = {}) -> dict:
     """
     Get the JSON schema for the parameters and return type of a function as well 
     as the docstring description. 
@@ -105,12 +106,28 @@ def get_func_sig_json_schema(func: Callable) -> dict:
     # Parameters schema
     # -----------------
     signature = inspect.signature(func)
+    param_names = [n for n in signature.parameters.keys() if n != "self"]
+    # Get default values for parameters 
+    # <key: parameter name, value: default value>
+    default_param_values: dict[str, Any] = default_kwargs
+    for i, value in enumerate(default_args):
+        if i < len(param_names):
+            # args override kwargs if both are provided
+            default_param_values[param_names[i]] = value
     fields = {}
     for param_name, param in signature.parameters.items():
         if param_name == "self":
             continue
         annotation = param.annotation
-        default = param.default if param.default is not inspect.Parameter.empty else ...
+        if param_name in default_param_values:
+            # Default values from RouterServer 
+            default = default_param_values[param_name]
+        elif param.default is not inspect.Parameter.empty:
+            # Default values from function signature
+            default = param.default
+        else:
+            # No default
+            default = ...
         if annotation is inspect.Parameter.empty:
             fields[param_name] = (Any, Field(default, description="Type unspecified — provide a value."))
         else:
