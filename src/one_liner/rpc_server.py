@@ -118,6 +118,22 @@ class ZMQRPCServer:
                        f"{', '.join([str(a) for a in args])}"
                        f"{', ' if (len(args) and len(kwargs)) else ''}"
                        f"{', '.join([str(k)+'='+str(v) for k,v in kwargs.items()])})")
+
+        # Validate that the object and attribute exists
+        if obj_name not in self.instances:
+            raise KeyError(f"'{obj_name}' is not present in instances.")
+        if not hasattr(self.instances[obj_name], attr_name):
+            raise AttributeError(f"'{obj_name}' does not have attribute '{attr_name}'")
+
+        # Validate name call is unique - warn user if not
+        if call_name in self.named_call_signatures:
+            self.log.warning(f"Overwriting existing named call: {call_name}")
+
+        # Arity check: verify arg/kwargs fits function signature
+        # (too many args, unknown kwargs, duplicate kwargs, etc)
+        sig = inspect.signature(getattr(self.instances[obj_name], attr_name))
+        sig.bind_partial(*args, **kwargs)  
+
         self.named_call_signatures[call_name] = (obj_name, attr_name, args, kwargs)
 
     def _call_by_name(self, call_name: str, args: list | None = None,
@@ -142,20 +158,10 @@ class ZMQRPCServer:
             raise KeyError(f"'{call_name}' is not a named call.")
         obj_name, attr_name, default_args, default_kwargs = \
             self.named_call_signatures[call_name]
-        
-        try: 
-            func = getattr(self.instances[obj_name], attr_name)
-            parameter_names = list(inspect.signature(func).parameters.keys())
-        except (KeyError, AttributeError, TypeError, ValueError):
-            parameter_names = []
 
-        args = args + default_args[len(args):]  
+        args = args + default_args[len(args):]
         kwargs = default_kwargs | kwargs
-        # Remove any kwargs that are already in args by index
-        # args have higher priority than kwargs
-        for i in range(len(args)): 
-            if i < len(parameter_names) and parameter_names[i] in kwargs:
-                del kwargs[parameter_names[i]]  
+
         debug_msg = (f"Invoking named call: {obj_name}.{attr_name}("
                      f"{', '.join([str(a) for a in args])}"
                      f"{', ' if (len(args) and len(kwargs)) else ''}"

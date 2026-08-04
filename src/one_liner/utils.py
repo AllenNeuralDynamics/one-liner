@@ -106,14 +106,16 @@ def get_func_sig_json_schema(func: Callable, default_args: list = [],
     # Parameters schema
     # -----------------
     signature = inspect.signature(func)
-    param_names = [n for n in signature.parameters.keys() if n != "self"]
-    # Get default values for parameters 
-    # <key: parameter name, value: default value>
-    default_param_values: dict[str, Any] = default_kwargs
-    for i, value in enumerate(default_args):
-        if i < len(param_names):
-            # args override kwargs if both are provided
-            default_param_values[param_names[i]] = value
+
+    # Get default values for parameters
+    #   <key: parameter name, value: default value>
+    #   This should be the pre-filled parameters defined in configs or `add_named_call`
+    #
+    #   Also does arity check: verify arg/kwargs fits function signature
+    #   (too many args, unknown kwargs, duplicate kwargs, etc)
+    bound = signature.bind_partial(*default_args, **default_kwargs)
+    default_param_values: dict[str, Any] = bound.arguments
+
     fields = {}
     for param_name, param in signature.parameters.items():
         if param_name == "self":

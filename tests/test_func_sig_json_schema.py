@@ -172,7 +172,7 @@ def rpc_configs_with_defaults():
         "with_kwargs", "test_rpc", "rpc_annotated", kwargs={"input": 10}
     )
     server.add_named_call(
-        "with_both", "test_rpc", "rpc_annotated", args=[10], kwargs={"input": 11}
+        "with_both", "test_rpc", "rpc_annotated", args=[10], kwargs={"opt": "hello"}
     )
     try:
         _, data = client.get_rpc_configurations()

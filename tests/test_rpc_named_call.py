@@ -41,20 +41,14 @@ def test_many_client_receive():
     client.close()
 
 
-def test_args_precedence_over_kwargs():
+def test_error_args_kwargs_function_signature():
     sensors = SensorArray()  # Create an object
     server = RouterServer(instances={"test_sensor_array": sensors})  # Create a server.
     client = RouterClient()
     server.run()
 
-    server.add_named_call("get_sensor0", "test_sensor_array", "get_data", args=[0])
-    _, data = client.call_by_name("get_sensor0") # omit timestamp
-    assert 0 in data
-
-    # Ensure args has higher precedence than kwargs. The default arg is 0, but we specify 1 in kwargs.
-    _, data_from_sensor1 = client.call_by_name("get_sensor0", kwargs={"sensor_index": 1})
-    assert 0 in data_from_sensor1
-
+    with pytest.raises(TypeError):
+        server.add_named_call("get_sensor0", "test_sensor_array", "get_data", args=[0], kwargs={"sensor_index": 0})
     server.close()
     client.close()
 
