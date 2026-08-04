@@ -394,11 +394,10 @@ class ZMQStreamServer:
         periodic_streams = {}
         for n in self._call_signature.keys():
             func = self._call_signature[n][0]
-            params_schema, return_schema, description = get_func_sig_json_schema(func).values()
+            _, return_schema, description = get_func_sig_json_schema(func).values()
             periodic_streams[n] = PeriodicStream(
                 encoding=str(self._call_encodings[n]),
                 frequency_hz=self._call_frequencies[n],
-                params_schema=params_schema,
                 description=description,
                 return_schema=return_schema,
                 enabled=self._call_enabled[n])

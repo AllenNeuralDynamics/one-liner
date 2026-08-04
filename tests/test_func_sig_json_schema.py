@@ -2,9 +2,9 @@ import pytest
 from one_liner.client import RouterClient
 from one_liner.server import RouterServer
 
-# NOTE: Tests only cover JSON schema rules that I implemented. Any other JSON
-# schema conversion rules were done by pydantic functions and are not tested here.
-# Examples of my implementation:
+# NOTE: Tests only cover custom JSON schema parsing functions. Any other JSON
+# schema parsing are done by pydantic functions and are not tested here.
+# Examples of custom implementation:
 #   - Stripping "self" from parameters
 #   - Handling unannotated parameters
 #   - Handling optional parameters
@@ -141,14 +141,11 @@ def test_annotated_stream_yields_schema():
     _, data = client.get_stream_configurations()
 
     stream = data.periodic_streams["test_stream"]
-    param_schema = stream.params_schema
     return_schema = stream.return_schema
     description = stream.description
 
-    assert param_schema["properties"]["a"]["type"] == "integer"
     assert return_schema["type"] == "integer"
     assert description == "test stream function"
-    assert "a" in param_schema["required"]
 
     server.close()
     client.close()
