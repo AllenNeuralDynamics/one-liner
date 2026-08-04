@@ -39,3 +39,46 @@ def test_many_client_receive():
 
     server.close()
     client.close()
+
+
+def test_args_precedence_over_kwargs():
+    sensors = SensorArray()  # Create an object
+    server = RouterServer(instances={"test_sensor_array": sensors})  # Create a server.
+    client = RouterClient()
+    server.run()
+
+    server.add_named_call("get_sensor0", "test_sensor_array", "get_data", args=[0])
+    _, data = client.call_by_name("get_sensor0") # omit timestamp
+    assert 0 in data
+
+    # Ensure args has higher precedence than kwargs. The default arg is 0, but we specify 1 in kwargs.
+    _, data_from_sensor1 = client.call_by_name("get_sensor0", kwargs={"sensor_index": 1})
+    assert 0 in data_from_sensor1
+
+    server.close()
+    client.close()
+
+def test_client_precedence_over_default_args():
+    sensors = SensorArray()  # Create an object
+    server = RouterServer(instances={"test_sensor_array": sensors})  # Create a server.
+    client = RouterClient()
+    server.run()
+
+    server.add_named_call("get_sensor0", "test_sensor_array", "get_data", args=[0])
+    _, data = client.call_by_name("get_sensor0") # omit timestamp
+    assert 0 in data
+
+    # Ensure we can override args.
+    _, data_from_sensor1 = client.call_by_name("get_sensor0", args=[1])
+    assert 1 in data_from_sensor1
+
+    server.add_named_call("get_sensor0", "test_sensor_array", "get_data", kwargs={"sensor_index": 0})
+    _, data = client.call_by_name("get_sensor0") # omit timestamp
+    assert 0 in data
+
+    # Ensure we can override args.
+    _, data_from_sensor1 = client.call_by_name("get_sensor0", kwargs={"sensor_index": 1})
+    assert 1 in data_from_sensor1
+
+    server.close()
+    client.close()
