@@ -1,3 +1,4 @@
+import inspect
 import logging
 import zmq
 from one_liner.socket_metadata_schema import Stream, PeriodicStream, Streams
@@ -115,6 +116,12 @@ class ZMQStreamServer:
         # Add/update func params and call frequency.
         args = [] if args is None else args
         kwargs = {} if kwargs is None else kwargs
+
+        # Arity check: verify arg/kwargs fits function signature
+        # (too many args, unknown kwargs, duplicate kwargs, etc)
+        sig = inspect.signature(func)
+        sig.bind_partial(*args, **kwargs)
+
         self._call_signature[name] = (func, args, kwargs)
         self._call_frequencies[name] = frequency_hz
         self._call_encodings[name] = serializer
@@ -425,16 +432,19 @@ class ZMQStreamServer:
         # callback function.
         for socket in self._manual_broadcast_sockets.values():
             socket.close()
-        # Because sockets are not threadsafe, we must create a one-off socket to
-        # shutdown the steerable proxy before we can close the related sockets.
-        stream_proxy_ctrl_socket = self._context.socket(zmq.REQ)
-        stream_proxy_ctrl_socket.setsockopt(zmq.LINGER, 0)
-        stream_proxy_ctrl_socket.connect(self._stream_proxy_ctrl_address)
-        stream_proxy_ctrl_socket.send_string("TERMINATE")
-        stream_proxy_ctrl_socket.recv() # Wait for empty reply to confirm.
-        stream_proxy_ctrl_socket.close()
-        if self._proxy_thread and self._proxy_thread.is_alive():
-            self._proxy_thread.join()
+        # Only shudown the steerable-proxy shutdown handshake if run() was called
+        # Otherwise .recv() would block since nothing is running
+        if self._is_running:
+            # Because sockets are not threadsafe, we must create a one-off socket to
+            # shutdown the steerable proxy before we can close the related sockets.
+            stream_proxy_ctrl_socket = self._context.socket(zmq.REQ)
+            stream_proxy_ctrl_socket.setsockopt(zmq.LINGER, 0)
+            stream_proxy_ctrl_socket.connect(self._stream_proxy_ctrl_address)
+            stream_proxy_ctrl_socket.send_string("TERMINATE")
+            stream_proxy_ctrl_socket.recv() # Wait for empty reply to confirm.
+            stream_proxy_ctrl_socket.close()
+            if self._proxy_thread and self._proxy_thread.is_alive():
+                self._proxy_thread.join()
         # Now we can call close:
         for socket in self._stream_proxy_sockets:
             socket.close()

@@ -66,13 +66,18 @@ class RouterServer:
                                 instances=self.instances)
         if config is None:
             return
-        if not isinstance(config, RouterServerConfig):
-            config = RouterServerConfig(**config)  # will also validate.
-        # Construct any streams or named calls from config spec.
-        for name, specs in config.periodic_streams.items():
-            self.add_stream(stream_name=name, **specs.model_dump())
-        for name, specs in config.named_calls.items():
-            self.add_named_call(call_name=name, **specs.model_dump())
+        # Release Stream and RPC server if RouterServer config setup fails
+        # (ex. missing object or attribute in config)
+        try:
+            if not isinstance(config, RouterServerConfig):
+                config = RouterServerConfig(**config)  # will also validate.
+            for name, specs in config.periodic_streams.items():
+                self.add_stream(stream_name=name, **specs.model_dump())
+            for name, specs in config.named_calls.items():
+                self.add_named_call(call_name=name, **specs.model_dump())
+        except Exception:
+            self.close()
+            raise
 
     def run(self, block: bool = False):
         """Setup rpc listener and broadcaster.

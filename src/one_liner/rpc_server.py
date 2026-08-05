@@ -206,7 +206,9 @@ class ZMQRPCServer:
 
     def close(self):
         self._keep_receiving.clear()
-        self._receive_thread.join()
+        # _receive_thread is only created by run(); may be None if never started.
+        if self._receive_thread is not None:
+            self._receive_thread.join()
         self.socket.close()
         if not self._context_managed_externally:
             self.context.term()
