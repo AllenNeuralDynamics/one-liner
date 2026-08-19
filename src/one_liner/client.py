@@ -3,7 +3,7 @@
 import logging
 import pickle
 import zmq
-from one_liner.stream_schema import Streams
+from one_liner.socket_metadata_schema import Streams
 from one_liner import __version__ as local_version
 from one_liner.utils import Protocol, Encoding, RPCException, StreamException, DESERIALIZERS, _recv
 from typing import Any, Callable, Literal, Tuple
@@ -236,6 +236,10 @@ class RouterClient:
         """
         return self.rpc_client.call("__streamer", "get_configuration",
                                     kwargs={"as_dict": as_dict})
+
+    def get_rpc_configurations(self, as_dict: bool = False) -> dict:
+        """Get the configuration for all RPCs."""
+        return self.rpc_client.call("__router_server", "get_rpc", args=[as_dict])
 
     @property
     def version(self):
