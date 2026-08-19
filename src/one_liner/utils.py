@@ -1,7 +1,9 @@
+import inspect
 import orjson
 import struct
 import pickle
 import zmq
+from pydantic import TypeAdapter, create_model, Field
 from time import perf_counter as now
 from typing import Any, Literal, Callable, Tuple
 
@@ -85,6 +87,68 @@ def _recv(socket: zmq.Context.socket, flag: zmq.Flag = 0, prefix: str | None = N
     success, timestamp = pickle.loads(raw_bytes[prefix_len + 2:])
     data = deserialize_fn(raw_bytes[prefix_len + 2 + metadata_num_bytes:])
     return success, timestamp, data
+
+
+def get_func_sig_json_schema(func: Callable, default_args: list = [], 
+                             default_kwargs: dict = {}) -> dict:
+    """
+    Get the JSON schema for the parameters and return type of a function as well 
+    as the docstring description. 
+    
+    NOTE: utilizes jsonref library to resolve any $ref references in the schema. 
+    Since each schema is generated from its own function signature, there aren't
+    any shared references between schemas, so this is a safe operation. 
+    Plus this simplifies converting schemas -> models. 
+    Pydantic may support this natively in the future according to these issues: 
+    https://github.com/pydantic/pydantic/issues/889
+    https://github.com/pydantic/pydantic/issues/12023
+    """
+    # Parameters schema
+    # -----------------
+    signature = inspect.signature(func)
+
+    # Get default values for parameters
+    #   <key: parameter name, value: default value>
+    #   This should be the pre-filled parameters defined in configs or `add_named_call`
+    #
+    #   Also does arity check: verify arg/kwargs fits function signature
+    #   (too many args, unknown kwargs, duplicate kwargs, etc)
+    bound = signature.bind_partial(*default_args, **default_kwargs)
+    default_param_values: dict[str, Any] = bound.arguments
+
+    fields = {}
+    for param_name, param in signature.parameters.items():
+        if param_name == "self":
+            continue
+        annotation = param.annotation
+        if param_name in default_param_values:
+            # Default values from RouterServer 
+            default = default_param_values[param_name]
+        elif param.default is not inspect.Parameter.empty:
+            # Default values from function signature
+            default = param.default
+        else:
+            # No default
+            default = ...
+        if annotation is inspect.Parameter.empty:
+            fields[param_name] = (Any, Field(default, description="Type unspecified — provide a value."))
+        else:
+            fields[param_name] = (annotation, default)
+    # Build pydantic model with per-parameter fields with default values and `required`. 
+    params_model = create_model(f"{func.__name__}_params", **fields)
+    params_schema = params_model.model_json_schema()
+
+    # Return type schema
+    # ------------------
+    return_annotation = signature.return_annotation
+    if return_annotation is inspect.Signature.empty or return_annotation is None:
+        # Default schema for no return type"
+        return_schema = {}
+    else:
+        return_schema = TypeAdapter(return_annotation).json_schema()
+
+    return {"params": params_schema, "return": return_schema,
+            "description": inspect.getdoc(func)}
 
 
 class RPCException(Exception):

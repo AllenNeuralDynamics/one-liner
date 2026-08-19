@@ -7,6 +7,7 @@ from one_liner.rpc_server import ZMQRPCServer
 from one_liner.utils import Protocol, Encoding
 from typing import Any, Callable
 from one_liner.models import RouterServerConfig
+from one_liner.socket_metadata_schema import RPC
 
 
 class RouterServer:
@@ -65,13 +66,18 @@ class RouterServer:
                                 instances=self.instances)
         if config is None:
             return
-        if not isinstance(config, RouterServerConfig):
-            config = RouterServerConfig(**config)  # will also validate.
-        # Construct any streams or named calls from config spec.
-        for name, specs in config.periodic_streams.items():
-            self.add_stream(stream_name=name, **specs.model_dump())
-        for name, specs in config.named_calls.items():
-            self.add_named_call(call_name=name, **specs.model_dump())
+        # Release Stream and RPC server if RouterServer config setup fails
+        # (ex. missing object or attribute in config)
+        try:
+            if not isinstance(config, RouterServerConfig):
+                config = RouterServerConfig(**config)  # will also validate.
+            for name, specs in config.periodic_streams.items():
+                self.add_stream(stream_name=name, **specs.model_dump())
+            for name, specs in config.named_calls.items():
+                self.add_named_call(call_name=name, **specs.model_dump())
+        except Exception:
+            self.close()
+            raise
 
     def run(self, block: bool = False):
         """Setup rpc listener and broadcaster.
@@ -211,6 +217,12 @@ class RouterServer:
         """
         self.streamer.add_zmq_stream(name=name, address=address, enabled=enabled,
                                      log_chatter=log_chatter)
+
+    def get_rpc(self, as_dict: bool = False) -> dict[str, RPC | dict]:
+        """
+        Get a breakdown of every RPC with its corresponding function signature.
+        """
+        return self.rpc.get_configuration(as_dict=as_dict)
 
     def get_stream_fn(self, name: str, set_timestamp: bool = False,
                       serializer: Encoding | Callable = "pickle") -> Callable:

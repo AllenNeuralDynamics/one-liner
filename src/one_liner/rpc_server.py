@@ -1,9 +1,11 @@
+import inspect
 import logging
 import pickle
 from ftplib import error_reply
 
 import zmq
-from one_liner.utils import _send, Protocol
+from one_liner.utils import _send, Protocol, get_func_sig_json_schema
+from one_liner.socket_metadata_schema import RPC
 from threading import Thread, Event
 from typing import Any
 
@@ -60,6 +62,36 @@ class ZMQRPCServer:
             except Exception as e:
                 _send(self.socket, name="", data=str(e), success=False)
 
+    def _get_rpc_from_named_calls(self, name_call: tuple) -> RPC:
+        """
+        Extract RPC information from the named_call_signature. Extracts parameters and return types 
+        from the underlying function
+        """
+
+        obj_name, attr_name, args, kwargs = name_call
+        func = getattr(self.instances[obj_name], attr_name)
+        params_schema, return_schema, description = get_func_sig_json_schema(
+            func, default_args=args, default_kwargs=kwargs).values()
+
+        return RPC(
+            instance=obj_name,
+            params_schema=params_schema,
+            return_schema=return_schema,
+            description=description
+        )
+
+    def get_configuration(self, as_dict: bool) -> dict[str, RPC | dict]:
+        """
+        Get a breakdown of every RPC with its corresponding function signature.
+        """
+        configuration = {}
+        for n in self.named_call_signatures:
+            rpc = self._get_rpc_from_named_calls(self.named_call_signatures[n]) 
+            configuration[n] = rpc.model_dump() if as_dict else rpc
+
+        return configuration
+
+
     def add_named_call(self, call_name: str,
                        obj_name: str, attr_name: str,
                        args: list | None = None, kwargs: list | None = None):
@@ -86,6 +118,22 @@ class ZMQRPCServer:
                        f"{', '.join([str(a) for a in args])}"
                        f"{', ' if (len(args) and len(kwargs)) else ''}"
                        f"{', '.join([str(k)+'='+str(v) for k,v in kwargs.items()])})")
+
+        # Validate that the object and attribute exists
+        if obj_name not in self.instances:
+            raise KeyError(f"'{obj_name}' is not present in instances.")
+        if not hasattr(self.instances[obj_name], attr_name):
+            raise AttributeError(f"'{obj_name}' does not have attribute '{attr_name}'")
+
+        # Validate name call is unique - warn user if not
+        if call_name in self.named_call_signatures:
+            self.log.warning(f"Overwriting existing named call: {call_name}")
+
+        # Arity check: verify arg/kwargs fits function signature
+        # (too many args, unknown kwargs, duplicate kwargs, etc)
+        sig = inspect.signature(getattr(self.instances[obj_name], attr_name))
+        sig.bind_partial(*args, **kwargs)  
+
         self.named_call_signatures[call_name] = (obj_name, attr_name, args, kwargs)
 
     def _call_by_name(self, call_name: str, args: list | None = None,
@@ -110,9 +158,10 @@ class ZMQRPCServer:
             raise KeyError(f"'{call_name}' is not a named call.")
         obj_name, attr_name, default_args, default_kwargs = \
             self.named_call_signatures[call_name]
-        # Update args & kwargs from their defaults for this call if specified.
+
         args = args + default_args[len(args):]
         kwargs = default_kwargs | kwargs
+
         debug_msg = (f"Invoking named call: {obj_name}.{attr_name}("
                      f"{', '.join([str(a) for a in args])}"
                      f"{', ' if (len(args) and len(kwargs)) else ''}"
@@ -157,7 +206,9 @@ class ZMQRPCServer:
 
     def close(self):
         self._keep_receiving.clear()
-        self._receive_thread.join()
+        # _receive_thread is only created by run(); may be None if never started.
+        if self._receive_thread is not None:
+            self._receive_thread.join()
         self.socket.close()
         if not self._context_managed_externally:
             self.context.term()

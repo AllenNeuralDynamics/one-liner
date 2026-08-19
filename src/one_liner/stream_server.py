@@ -1,7 +1,8 @@
+import inspect
 import logging
 import zmq
-from one_liner.stream_schema import Stream, PeriodicStream, Streams
-from one_liner.utils import Encoding, Protocol, _send
+from one_liner.socket_metadata_schema import Stream, PeriodicStream, Streams
+from one_liner.utils import Encoding, Protocol, _send, get_func_sig_json_schema
 from threading import Event, Lock, Thread
 from time import sleep
 from typing import Callable, get_type_hints
@@ -115,6 +116,12 @@ class ZMQStreamServer:
         # Add/update func params and call frequency.
         args = [] if args is None else args
         kwargs = {} if kwargs is None else kwargs
+
+        # Arity check: verify arg/kwargs fits function signature
+        # (too many args, unknown kwargs, duplicate kwargs, etc)
+        sig = inspect.signature(func)
+        sig.bind_partial(*args, **kwargs)
+
         self._call_signature[name] = (func, args, kwargs)
         self._call_frequencies[name] = frequency_hz
         self._call_encodings[name] = serializer
@@ -391,11 +398,16 @@ class ZMQStreamServer:
         """
         manual_streams = {n: Stream(encoding=str(self._manual_broadcast_encodings[n]))
                           for n in self._manual_broadcast_sockets.keys()}
-        periodic_streams = {n: PeriodicStream(encoding=str(self._call_encodings[n]),
-                                              return_type=self._get_return_type(n),
-                                              frequency_hz=self._call_frequencies[n],
-                                              enabled=self._call_enabled[n])
-                            for n in self._call_signature.keys()}
+        periodic_streams = {}
+        for n in self._call_signature.keys():
+            func = self._call_signature[n][0]
+            _, return_schema, description = get_func_sig_json_schema(func).values()
+            periodic_streams[n] = PeriodicStream(
+                encoding=str(self._call_encodings[n]),
+                frequency_hz=self._call_frequencies[n],
+                description=description,
+                return_schema=return_schema,
+                enabled=self._call_enabled[n])
         # FIXME: how do we get the encoding for received arbitrary zmq data?
         zmq_streams = {n: Stream(encoding="unspecified") for n in self._zmq_streams}
         streams = Streams(manual_streams=manual_streams,
@@ -420,16 +432,19 @@ class ZMQStreamServer:
         # callback function.
         for socket in self._manual_broadcast_sockets.values():
             socket.close()
-        # Because sockets are not threadsafe, we must create a one-off socket to
-        # shutdown the steerable proxy before we can close the related sockets.
-        stream_proxy_ctrl_socket = self._context.socket(zmq.REQ)
-        stream_proxy_ctrl_socket.setsockopt(zmq.LINGER, 0)
-        stream_proxy_ctrl_socket.connect(self._stream_proxy_ctrl_address)
-        stream_proxy_ctrl_socket.send_string("TERMINATE")
-        stream_proxy_ctrl_socket.recv() # Wait for empty reply to confirm.
-        stream_proxy_ctrl_socket.close()
-        if self._proxy_thread and self._proxy_thread.is_alive():
-            self._proxy_thread.join()
+        # Only shudown the steerable-proxy shutdown handshake if run() was called
+        # Otherwise .recv() would block since nothing is running
+        if self._is_running:
+            # Because sockets are not threadsafe, we must create a one-off socket to
+            # shutdown the steerable proxy before we can close the related sockets.
+            stream_proxy_ctrl_socket = self._context.socket(zmq.REQ)
+            stream_proxy_ctrl_socket.setsockopt(zmq.LINGER, 0)
+            stream_proxy_ctrl_socket.connect(self._stream_proxy_ctrl_address)
+            stream_proxy_ctrl_socket.send_string("TERMINATE")
+            stream_proxy_ctrl_socket.recv() # Wait for empty reply to confirm.
+            stream_proxy_ctrl_socket.close()
+            if self._proxy_thread and self._proxy_thread.is_alive():
+                self._proxy_thread.join()
         # Now we can call close:
         for socket in self._stream_proxy_sockets:
             socket.close()
