@@ -1,10 +1,14 @@
-""" This is an example pattern"""
+"""This is an example pattern"""
 
 from pathlib import Path
 from typing import Protocol
 from pydantic import BaseModel
 
-from instrument_utils import get_connector
+from instrument_utils import (
+    ZmqRPCConnector,
+    ZmqRPCConnectorMixin,
+    get_connector,
+)
 
 ### Define the models and protocol that the instrument will use to communicate
 ### Maybe this is in an api.py or something
@@ -54,7 +58,25 @@ class InstrumentConfig(BaseModel):
 if __name__ == "__main__":
     config = InstrumentConfig()
 
-    connector = get_connector(
+    # Option 1: Using a mixin class and requiring the user to define InsfrastructureConnector
+    class InfrastructureConnector(
+        ZmqRPCConnectorMixin, InstrumentInfrastructureAPI
+    ): ...
+
+    connector1 = InfrastructureConnector(
+        port=config.infra_adapter_port,
+        cmd_to_start_adapter_server=config.infra_adapter_cmd,
+    )
+
+    # Option 2: A parametrizable connector class that overrides __new__
+    connector2 = ZmqRPCConnector(
+        protocol=InstrumentInfrastructureAPI,
+        port=config.infra_adapter_port,
+        cmd_to_start_adapter_server=config.infra_adapter_cmd,
+    )
+
+    # Option 3: A helper function that dynamically creates a subclass of the API
+    connector3 = get_connector(
         InstrumentInfrastructureAPI,
         port=config.infra_adapter_port,
         target_obj_name=InstrumentInfrastructureAPI.api_name,
@@ -62,6 +84,6 @@ if __name__ == "__main__":
     )
 
     # Using connector methods has type hints and autocompletion
-    print(connector.get_project_info("example_project_id"))
-    print(connector.start_new_session("user123", "subject456"))
-    print(connector.get_subject_info("subject456"))
+    print(connector1.get_project_info("example_project_id"))
+    print(connector2.start_new_session("user123", "subject456"))
+    print(connector3.get_subject_info("subject456"))
