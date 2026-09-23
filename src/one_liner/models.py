@@ -1,7 +1,8 @@
 """RouterServerAPI Pydantic Model for creating a RouterServer from a dict"""
 from pydantic import BaseModel
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
+AccessType = Literal["get", "set"]
 
 class PeriodicStream(BaseModel):
     frequency_hz: float
@@ -13,6 +14,7 @@ class NamedCall(BaseModel):
     attr_name: str
     args: Optional[list[Any]] = None
     kwargs: Optional[dict[str, Any]] = None
+    access_type: Optional[AccessType] = None
 
 class RouterServerConfig(BaseModel):
     periodic_streams: dict[str, PeriodicStream] = {}

@@ -6,7 +6,7 @@ from one_liner.stream_server import ZMQStreamServer
 from one_liner.rpc_server import ZMQRPCServer
 from one_liner.utils import Protocol, Encoding
 from typing import Any, Callable
-from one_liner.models import RouterServerConfig
+from one_liner.models import AccessType, RouterServerConfig
 from one_liner.socket_metadata_schema import RPC
 
 
@@ -92,7 +92,8 @@ class RouterServer:
         self.streamer.run(run_in_thread=(not block))
 
     def add_named_call(self, call_name: str, obj_name: str, attr_name: str,
-                       args: list | None = None, kwargs: dict | None = None):
+                       args: list | None = None, kwargs: dict | None = None,
+                       access_type: AccessType | None = None):
         """ Setup a call to be called with
         [`call_by_name`][one_liner.client.RouterClient.call_by_name] on the
         [`RouterClient`][one_liner.client.RouterClient].
@@ -110,6 +111,11 @@ class RouterServer:
             Default args to save with the function call.
         kwargs : dict
             Default kwargs to save with the function call.
+        access_type:
+            user annotation related to the effect that calling the function has
+            on the remote object's state. This value is optional and appears as
+            part of the metadata available from
+            :py:meth:`~one_line.client.RouterClient.get_rpc_configurations`
 
         Notes
         -----
@@ -119,7 +125,7 @@ class RouterServer:
         """
         return self.rpc.add_named_call(call_name=call_name, obj_name=obj_name,
                                        attr_name=attr_name, args=args,
-                                       kwargs=kwargs)
+                                       kwargs=kwargs, access_type=access_type)
 
     def add_stream(self, stream_name: str, frequency_hz: float, obj_name: str,
                    attr_name: str, args: list | None = None,
