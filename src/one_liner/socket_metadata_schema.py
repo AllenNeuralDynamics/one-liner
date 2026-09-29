@@ -1,4 +1,5 @@
 from typing import Optional
+from one_liner.models import AccessType
 
 from pydantic import (
     BaseModel,
@@ -16,6 +17,7 @@ class SocketMetadata(BaseModel):
 
 class RPC(SocketMetadata):
     instance: str
+    access_type: Optional[AccessType] = None
 
 
 class Stream(SocketMetadata):

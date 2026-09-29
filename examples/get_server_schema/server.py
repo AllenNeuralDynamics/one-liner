@@ -122,11 +122,13 @@ if __name__ == "__main__":
         "get_dancer",
         "disco_device",
         "get_dancer",
+        access_type="get"
     )
     server.add_named_call(
         "change_tune",
         "disco_device",
         "change_tune",
+        access_type="set"
     )
     server.add_named_call(
         "no_annotation",

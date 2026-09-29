@@ -1,10 +1,10 @@
 import inspect
 import logging
 import pickle
-from ftplib import error_reply
 
 import zmq
 from one_liner.utils import _send, Protocol, get_func_sig_json_schema
+from one_liner.models import AccessType
 from one_liner.socket_metadata_schema import RPC
 from threading import Thread, Event
 from typing import Any
@@ -35,6 +35,7 @@ class ZMQRPCServer:
         self.instances: dict[str, Any] = {} if instances is None else instances
         self.instances.update({"__rpc_server": self})
         self.named_call_signatures = {}
+        self.named_call_access_types = {}
 
     def run(self):
         """Launch thread to execute RPCs."""
@@ -62,19 +63,20 @@ class ZMQRPCServer:
             except Exception as e:
                 _send(self.socket, name="", data=str(e), success=False)
 
-    def _get_rpc_from_named_calls(self, name_call: tuple) -> RPC:
+    def _get_rpc_from_named_calls(self, named_call: str) -> RPC:
         """
-        Extract RPC information from the named_call_signature. Extracts parameters and return types 
+        Extract RPC information from the named_call signature. Extracts parameters and return types
         from the underlying function
         """
 
-        obj_name, attr_name, args, kwargs = name_call
+        obj_name, attr_name, args, kwargs = self.named_call_signatures[named_call]
         func = getattr(self.instances[obj_name], attr_name)
         params_schema, return_schema, description = get_func_sig_json_schema(
             func, default_args=args, default_kwargs=kwargs).values()
 
         return RPC(
             instance=obj_name,
+            access_type=self.named_call_access_types[named_call],
             params_schema=params_schema,
             return_schema=return_schema,
             description=description
@@ -85,16 +87,17 @@ class ZMQRPCServer:
         Get a breakdown of every RPC with its corresponding function signature.
         """
         configuration = {}
-        for n in self.named_call_signatures:
-            rpc = self._get_rpc_from_named_calls(self.named_call_signatures[n]) 
-            configuration[n] = rpc.model_dump() if as_dict else rpc
+        for named_call in self.named_call_signatures.keys():
+            rpc = self._get_rpc_from_named_calls(named_call)
+            configuration[named_call] = rpc.model_dump() if as_dict else rpc
 
         return configuration
 
 
     def add_named_call(self, call_name: str,
                        obj_name: str, attr_name: str,
-                       args: list | None = None, kwargs: list | None = None):
+                       args: list | None = None, kwargs: dict | None = None,
+                       access_type: AccessType | None = None):
         """Setup a call to be called with `call_by_name` on the
         :py:class:`~one_lner.client.ZMQRPCClient`
 
@@ -104,6 +107,10 @@ class ZMQRPCServer:
         :param attr_name: name of the callable attribute (method).
         :param args: default args to save with the function call.
         :param kwargs: default kwargs to save with the function call.
+        :param access_type: user annotation related to the effect that calling
+            the function has on the remote object's state. This value is
+            optional and appears as part of the metadata available from
+            :py:meth:`~one_liner.server.rpc_server.ZMQRPCServer.get_configuration`
 
         .. note::
            `args` and `kwargs` can be overwritten by index or name respectively
@@ -132,9 +139,10 @@ class ZMQRPCServer:
         # Arity check: verify arg/kwargs fits function signature
         # (too many args, unknown kwargs, duplicate kwargs, etc)
         sig = inspect.signature(getattr(self.instances[obj_name], attr_name))
-        sig.bind_partial(*args, **kwargs)  
+        sig.bind_partial(*args, **kwargs)
 
         self.named_call_signatures[call_name] = (obj_name, attr_name, args, kwargs)
+        self.named_call_access_types[call_name] = access_type
 
     def _call_by_name(self, call_name: str, args: list | None = None,
                       kwargs: dict | None = None):
