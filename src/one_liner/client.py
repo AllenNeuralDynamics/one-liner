@@ -134,7 +134,7 @@ class RouterClient:
     def has_write_access(self):
         return self.rpc_client.has_write_access()
 
-    def get_write_token(self, force: bool = True):
+    def get_write_token(self, force: bool = False):
         return self.rpc_client.get_write_token(force=force)
 
     def release_write_token(self):
@@ -275,8 +275,7 @@ class ZMQRPCClient:
     __slots__ = ("context", "socket", "_write_token", "log")
 
     def __init__(self, protocol: Protocol = "tcp", interface: str = "localhost",
-                 port: str = "5555", context: zmq.Context = None,
-                 force_write_access: bool = False):
+                 port: str = "5555", context: zmq.Context = None):
         self.log = logging.getLogger(self.__class__.__name__)
         self.context = context or zmq.Context()
         self.socket = self.context.socket(zmq.REQ)
@@ -311,14 +310,21 @@ class ZMQRPCClient:
     def get_write_token(self, force: bool = False):
         """Request a write token or acquire one by force.
         Idempotent if you already have the valid write token.
+
+        Raises
+        ------
+        PermissionError
+            if the write token was not acquired.
         """
         try:
             self._write_token = self.call("__rpc_server", "_check_or_get_write_token",
                                           kwargs={"force": force,
-                                          "curr_write_token": self._write_token})[-1]
+                                                  "curr_write_token": self._write_token})[-1]
+            print(f"got: {self._write_token}")
         except RPCException:
-            self.log.warning("Failed to acquire write token. Cannot call RPCs "
-                             "that mutate state.")
+            error_msg = "Failed to acquire write token. Cannot call RPCs that mutate state."
+            self.log.warning(error_msg)
+            raise PermissionError(error_msg)
 
     def release_write_token(self):
         self.call("__rpc_server", "_release_write_token")
