@@ -96,4 +96,13 @@ def test_force_get_write_token():
 
 
 def test_release_write_token():
-    pass
+    server = RouterServer(protocol="inproc", interface="localhost",
+                          instances={"TestDevice": TestDevice()}, config=config)
+    server.run()
+    client = RouterClient(protocol="inproc")
+    assert client.has_write_token() is False
+    client.get_write_token()
+    client.release_write_token()
+    assert client.has_write_token() is False
+    client.close()
+    server.close()
