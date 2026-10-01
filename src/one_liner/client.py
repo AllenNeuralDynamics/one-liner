@@ -284,11 +284,6 @@ class ZMQRPCClient:
         address = f"{protocol}://{interface}:{port}"
         self.socket.connect(address)
         self._write_token = ""
-        try:
-            self.get_write_token()
-        except RPCException:
-            self.log.warning("Failed to acquire write token. Cannot call RPCs "
-                             "that mutate state.")
 
     def call_by_name(self, call_name: str, args: list = None, kwargs: dict = None,
                      deserializer: Encoding | Callable = "pickle") \
@@ -317,9 +312,13 @@ class ZMQRPCClient:
         """Request a write token or acquire one by force.
         Idempotent if you already have the valid write token.
         """
-        self._write_token = self.call("__rpc_server", "_check_or_get_write_token",
-                                      kwargs={"force": force,
-                                              "curr_write_token": self._write_token})[-1]
+        try:
+            self._write_token = self.call("__rpc_server", "_check_or_get_write_token",
+                                          kwargs={"force": force,
+                                          "curr_write_token": self._write_token})[-1]
+        except RPCException:
+            self.log.warning("Failed to acquire write token. Cannot call RPCs "
+                             "that mutate state.")
 
     def release_write_token(self):
         self.call("__rpc_server", "_release_write_token")
