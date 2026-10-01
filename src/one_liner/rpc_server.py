@@ -2,6 +2,7 @@ import inspect
 import logging
 import pickle
 
+import secrets
 import zmq
 from one_liner.utils import _send, Protocol, get_func_sig_json_schema
 from one_liner.models import AccessType
@@ -36,6 +37,10 @@ class ZMQRPCServer:
         self.instances.update({"__rpc_server": self})
         self.named_call_signatures = {}
         self.named_call_access_types = {}
+        self.obj_attr_access_types = {}  # Same as above except by obj/attr
+        self._write_token: str = secrets.token_urlsafe()
+        self._write_token_allocated: bool = False
+        self._recv_write_token: str = ""  # The most recent request's write token
 
     def run(self):
         """Launch thread to execute RPCs."""
@@ -55,7 +60,10 @@ class ZMQRPCServer:
             except zmq.Again:
                 continue
             request = pickle.loads(pickled_request)
-            obj_name, attr_name, args, kwargs = request
+            # FYI: write_token can be empty string if requester doesn't have it.
+            # _check_or_get_write_token does not have an access_type, so we
+            #   can always call it.
+            self._recv_write_token, obj_name, attr_name, args, kwargs = request
             try:
                 reply = self._call(obj_name=obj_name, attr_name=attr_name,
                                    args=args, kwargs=kwargs)
@@ -92,6 +100,36 @@ class ZMQRPCServer:
             configuration[named_call] = rpc.model_dump() if as_dict else rpc
 
         return configuration
+
+    def _check_or_get_write_token(self, curr_write_token: str = None, force: bool = False):
+        """
+        Get the write token if not yet allocated and not forced or force
+        creation of a new one.
+        If allocated, return the write token if the input write token matches
+        (makes this function idempotent).
+
+        Raises
+        ------
+            PermissionError
+                if the token has already been allocated and force=false
+        """
+        if force:
+            self.log.debug("Forcing creation of a new write token.")
+            self._write_token = secrets.token_urlsafe()
+            self._write_token_allocated = True
+            return self._write_token
+        if curr_write_token == self._write_token:
+            return self._write_token
+        if not self._write_token_allocated:
+            self._write_token_allocated = True
+            return self._write_token
+        else:
+            raise PermissionError("Write token already allocated."
+                                  "Cannot reallocate without forcing.")
+
+    def _release_write_token(self):
+        self._write_token_allocated = False
+        self._write_token = secrets.token_urlsafe()
 
 
     def add_named_call(self, call_name: str,
@@ -142,6 +180,7 @@ class ZMQRPCServer:
         sig.bind_partial(*args, **kwargs)
 
         self.named_call_signatures[call_name] = (obj_name, attr_name, args, kwargs)
+        self.obj_attr_access_types[(obj_name, attr_name)] = access_type
         self.named_call_access_types[call_name] = access_type
 
     def _call_by_name(self, call_name: str, args: list | None = None,
@@ -182,6 +221,10 @@ class ZMQRPCServer:
               kwargs: list | None = None):
         """Call the object attribute with the specified args/kwargs and return
         the result."""
+
+        access_type = self.obj_attr_access_types.get((obj_name, attr_name), None)
+        if access_type == "set" and self._recv_write_token != self._write_token:
+            raise PermissionError("Cannot mutate local state with incorrect write token.")
         args = [] if args is None else args
         kwargs = {} if kwargs is None else kwargs
         if obj_name not in self.instances:

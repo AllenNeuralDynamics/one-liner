@@ -128,6 +128,18 @@ class RouterClient:
         return self.rpc_client.call(obj_name, attr_name, args, kwargs,
                                     deserializer=deserializer)
 
+    def has_write_token(self):
+        return self.rpc_client.has_write_token()
+
+    def has_write_access(self):
+        return self.rpc_client.has_write_access()
+
+    def get_write_token(self, force: bool = True):
+        return self.rpc_client.get_write_token(force=force)
+
+    def release_write_token(self):
+        return self.rpc_client.release_write_token()
+
     def configure_stream(self, name: str,
                          storage_type: Literal["queue", "cache"] = "queue",
                          deserializer: Encoding | Callable = "pickle"):
@@ -260,15 +272,23 @@ class RouterClient:
 
 class ZMQRPCClient:
 
-    __slots__ = ("context", "socket")
+    __slots__ = ("context", "socket", "_write_token", "log")
 
     def __init__(self, protocol: Protocol = "tcp", interface: str = "localhost",
-                 port: str = "5555", context: zmq.Context = None):
+                 port: str = "5555", context: zmq.Context = None,
+                 force_write_access: bool = False):
+        self.log = logging.getLogger(self.__class__.__name__)
         self.context = context or zmq.Context()
         self.socket = self.context.socket(zmq.REQ)
         self.socket.setsockopt(zmq.LINGER, 0)
         address = f"{protocol}://{interface}:{port}"
         self.socket.connect(address)
+        self._write_token = ""
+        try:
+            self.get_write_token()
+        except RPCException:
+            self.log.warning("Failed to acquire write token. Cannot call RPCs "
+                             "that mutate state.")
 
     def call_by_name(self, call_name: str, args: list = None, kwargs: dict = None,
                      deserializer: Encoding | Callable = "pickle") \
@@ -286,14 +306,34 @@ class ZMQRPCClient:
         """
         args = [] if args is None else args
         kwargs = {} if kwargs is None else kwargs
-        pickled_req = pickle.dumps((obj_name, attr_name, args, kwargs))
+        pickled_req = pickle.dumps((self._write_token, obj_name, attr_name, args, kwargs))
         self.socket.send(pickled_req, copy=False)
         success, timestamp, data = _recv(self.socket, deserializer=deserializer)
         if not success:
             raise RPCException(data) # data contains exception string.
         return timestamp, data
 
+    def get_write_token(self, force: bool = False):
+        """Request a write token or acquire one by force.
+        Idempotent if you already have the valid write token.
+        """
+        self._write_token = self.call("__rpc_server", "_check_or_get_write_token",
+                                      kwargs={"force": force,
+                                              "curr_write_token": self._write_token})[-1]
+
+    def release_write_token(self):
+        self.call("__rpc_server", "_release_write_token")
+        self._write_token = None
+
+    def has_write_token(self):
+        return True if self._write_token else False
+
+    def has_write_access(self):
+        return self.has_write_token()
+
     def close(self):
+        if self.has_write_token():
+            self.release_write_token()
         self.socket.close()
 
 
