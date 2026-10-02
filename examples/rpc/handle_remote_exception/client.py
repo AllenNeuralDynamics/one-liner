@@ -6,3 +6,5 @@ if __name__ == "__main__":
         client.call("my_horn", "malfunction")
     except Exception as e:
         print(f"calling function raised an exception in the response: {str(e)}")
+    finally:
+        client.close()

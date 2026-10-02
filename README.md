@@ -251,6 +251,32 @@ server.run()
 
 Now, just like before, a connected client can `client.call("my_horn", "beep")` like before.
 
+## Restricting "Write" Access
+RPCs exposed from a `RouterClient` support an optional annotation to mark whether the function implementation alters state.
+Marking a function as `get` hints that the function implements "read-only-like" behavior, while a `set` hints that the function applies "write-like" behavior that mutates the remote object's state.
+These `get`/`set` annotations only apply to `named calls` (i.e: not `streams`).
+
+### Write Token
+Functions marked as `set` can only be accessed by one `RouterClient` with the "write token."
+After creating a `RouterClient`, you can request the write token with `get_write_token()`.
+Only one `RouterClient` instance at a time can hold the write token, giving it access to the `set` methods.
+Conceptually, write-token based write access implements mutual exclusion similar to a mutex lock.
+
+```python
+server = RouterServer()
+server.run()
+
+client = RouterClient()
+client.get_write_token()  # This client can now call functions marked with `set`
+client.release_write_token()  # This client no longer has the write token
+```
+
+The write token can be acquired by force, causing any previously existing write token to be invalidated where further calls to `set`-annotated functions will raise a `PermissionError`.
+
+```python
+client2 = RouterClient()
+client2.get_write_token(force=True)  # This client booted other clients off.
+```
 
 ## Implementation Details
 
