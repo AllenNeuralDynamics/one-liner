@@ -900,7 +900,7 @@ wheels = [
 
 [[package]]
 name = "one-liner"
-version = "0.1.1.dev10"
+version = "0.1.1.dev11"
 source = { editable = "." }
 dependencies = [
     { name = "orjson" },
