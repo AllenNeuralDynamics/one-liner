@@ -67,7 +67,7 @@ class RouterClient:
     def call_by_name(self, call_name: str, args: list | None = None,
                      kwargs: dict | None = None,
                      deserializer: Encoding | Callable = "pickle",
-                     timeout_ms: int = WAIT_FOREVER_TIMEOUT) \
+                     timeout_s: float | None = None) \
             -> Any | Tuple[float, Any]:
 
         """Lookup a configured call by its `call_name`, call it with the specified
@@ -90,7 +90,8 @@ class RouterClient:
         deserializer :
             Callable function to deserialize the data or string-representation
             of one of the built-in options.
-        timeout_ms:
+        timeout_s:
+            max time in seconds to wait for a reply before raising a TimeoutError.
 
         Returns
         -------
@@ -98,13 +99,12 @@ class RouterClient:
         """
         return self.rpc_client.call_by_name(call_name=call_name, args=args,
                                             kwargs=kwargs, deserializer=deserializer,
-                                            timeout_ms=timeout_ms)
+                                            timeout_s=timeout_s)
 
     def call(self, obj_name: str, attr_name: str, args: list | None = None,
              kwargs: dict | None = None,
              deserializer: Encoding | Callable = "pickle",
-             timeout_ms: int = WAIT_FOREVER_TIMEOUT) \
-            -> Any | Tuple[float, Any]:
+             timeout_s: float | None = None) -> Any | Tuple[float, Any]:
         """Call a function/method within the scope of the connected
         [`RouterServer`][one_liner.server.RouterServer] and return the result.
 
@@ -121,11 +121,16 @@ class RouterClient:
         deserializer:
             callable function to deserialize the data or
             string-representation of one of the built-in options.
+        timeout_s:
+            max time in seconds to wait for a reply before raising a TimeoutError.
 
         Raises
         ------
         RPCException
-            if the underlying function call raises an exception
+            if the remotely-executed function raised an error.
+        TimeoutError
+            if the connected server does not issue a response within the
+            specified timeout.
 
         Notes
         -----
@@ -136,7 +141,7 @@ class RouterClient:
         return self.rpc_client.call(obj_name=obj_name, attr_name=attr_name,
                                     args=args, kwargs=kwargs,
                                     deserializer=deserializer,
-                                    timeout_ms=timeout_ms)
+                                    timeout_s=timeout_s)
 
     def has_write_token(self):
         return self.rpc_client.has_write_token()
@@ -151,8 +156,24 @@ class RouterClient:
         return self.rpc_client.release_write_token()
 
     @contextmanager
-    def lock_write_token(self, timeout_ms: int = WAIT_FOREVER_TIMEOUT):
-        with self.rpc_client.lock_write_token(timeout_ms=timeout_ms):
+    def lock_write_token(self, timeout_s: float | None = None):
+        """ Context Manager to get access to the write token.
+
+        Parameters
+        ----------
+        timeout_s:
+            the timeout (in seconds) to wait to acquire the the token before
+            raising an error.
+
+        Raises
+        ------
+        PermissionError:
+            if the write token never becomes available before the specified
+            timeout.
+        TimeoutError
+            if the server is unresponsive.
+        """
+        with self.rpc_client.lock_write_token(timeout_s=timeout_s):
             yield
 
     def configure_stream(self, name: str,
@@ -293,12 +314,13 @@ class ZMQRPCClient:
 
     def __init__(self, protocol: Protocol = "tcp", interface: str = "localhost",
                  port: str = "5555", context: zmq.Context = None,
-                 timeout_ms: int = WAIT_FOREVER_TIMEOUT):
+                 timeout_s: float | None = None):
         self.log = logging.getLogger(self.__class__.__name__)
         self.context = context or zmq.Context()
         self.socket = self.context.socket(zmq.REQ)
         self.socket.setsockopt(zmq.LINGER, 0)
-        self._default_rcv_timeout_ms: int = WAIT_FOREVER_TIMEOUT
+        self._default_rcv_timeout_ms: int = (WAIT_FOREVER_TIMEOUT
+                if timeout_s is None else round(timeout_s * 1000))
         self.socket.setsockopt(zmq.RCVTIMEO, self._default_rcv_timeout_ms)
         address = f"{protocol}://{interface}:{port}"
         self.socket.connect(address)
@@ -306,25 +328,28 @@ class ZMQRPCClient:
 
     def call_by_name(self, call_name: str, args: list = None, kwargs: dict = None,
                      deserializer: Encoding | Callable = "pickle",
-                     timeout_ms: int = WAIT_FOREVER_TIMEOUT) \
+                     timeout_s: float | None = None) \
             -> Any | Tuple[float, Any]:
         return self.call("__rpc_server", "_call_by_name",
                          args=[call_name], kwargs={"args": args, "kwargs": kwargs},
-                         deserializer=deserializer, timeout_ms=timeout_ms)
+                         deserializer=deserializer, timeout_s=timeout_s)
 
     def call(self, obj_name: str, attr_name: str, args: list | None = None,
              kwargs: dict | None = None,
              deserializer: Encoding | Callable = "pickle",
-             timeout_ms: int = -1) -> Tuple[float, Any]:
+             timeout_s: float | None = None) -> Tuple[float, Any]:
         """Call a remote function available to the connected
         [`RouterServer`][one_liner.server.RouterServer] and return the result.
 
         Raises
         ------
+        RPCException
+            if the remotely-executed function raised an error.
         TimeoutError
             if the connected server does not issue a response within the
             specified timeout.
         """
+        timeout_ms = round(timeout_s * 1000) if timeout_s is not None else WAIT_FOREVER_TIMEOUT
         # Apply custom timeout for this message.
         if timeout_ms != self._default_rcv_timeout_ms:
             self.socket.setsockopt(zmq.RCVTIMEO, timeout_ms)
@@ -346,7 +371,7 @@ class ZMQRPCClient:
         return timestamp, data
 
     def get_write_token(self, force: bool = False,
-                        reply_timeout_ms: int = WAIT_FOREVER_TIMEOUT):
+                        reply_timeout_s: float | None = None):
         """Request a write token or acquire one by force.
         Idempotent if you already have the valid write token.
 
@@ -361,16 +386,16 @@ class ZMQRPCClient:
             self._write_token = self.call("__rpc_server", "_check_or_get_write_token",
                                           kwargs={"force": force,
                                                   "curr_write_token": self._write_token},
-                                          timeout_ms=reply_timeout_ms)[-1]
+                                          timeout_s=reply_timeout_s)[-1]
         except RPCException:
             error_msg = "Failed to acquire write token."
             self.log.warning(error_msg)
             raise PermissionError(error_msg)
 
-    def release_write_token(self, reply_timeout_ms: int = WAIT_FOREVER_TIMEOUT):
+    def release_write_token(self, reply_timeout_s: float | None = None):
         try:
             self.call("__rpc_server", "_release_write_token",
-                      timeout_ms=reply_timeout_ms)
+                      timeout_s=reply_timeout_s)
         except TimeoutError:
             self.log.error("Failed to return write token! Server is unresponsive.")
             return
@@ -383,23 +408,40 @@ class ZMQRPCClient:
         return self.has_write_token()
 
     @contextmanager
-    def lock_write_token(self, timeout_ms: int = WAIT_FOREVER_TIMEOUT):
-        # Timeout waiting for a reply from the server is *distinct* from timeout
-        # to wait for a write token. Prevent get_write_token() from hanging
-        # by making both timeouts match.
+    def lock_write_token(self, timeout_s: float | None= None):
+        """ Context Manager to get access to the write token.
+
+        Parameters
+        ----------
+        timeout_s:
+            the timeout (in seconds) to wait to acquire the the token before
+            raising an error.
+
+        Raises
+        ------
+        PermissionError:
+            if the write token never becomes available before the specified
+            timeout.
+        TimeoutError
+            if the server is unresponsive.
+        """
+        # The timeout waiting for a reply from the server is *distinct* from
+        # the timeout waiting for the write token to be available. Prevent
+        # get_write_token() from hanging by making both timeouts match.
         try:
             start_time_s = perf_counter()
             timeout_elapsed = False
             while not self.has_write_token() and not timeout_elapsed:
+                timeout_elapsed = (False if timeout_s is None else
+                    (perf_counter() - start_time_s) > timeout_s)
                 try:
-                    self.get_write_token(reply_timeout_ms = timeout_ms)
+                    self.get_write_token(reply_timeout_s = timeout_s)
                 # Server rejected request. Another entity has the write token.
                 except PermissionError:
-                    if timeout_ms == WAIT_FOREVER_TIMEOUT:
-                        continue
-                    timeout_elapsed = ((perf_counter() - start_time_s)/1000) < timeout_ms
+                    if timeout_elapsed:
+                        raise
                     continue
-                # Server down and timeout was not infinite
+                # Server down and timeout was not infinite.
                 except TimeoutError:
                     self.log.error("Server connection is down.")
                     raise

@@ -3,6 +3,8 @@ from one_liner.utils import RPCException
 import pytest
 from one_liner.server import RouterServer
 from one_liner.client import RouterClient
+from time import sleep
+from threading import Thread
 
 config = {
     "named_calls": {
@@ -105,4 +107,56 @@ def test_release_write_token():
     client.release_write_token()
     assert client.has_write_token() is False
     client.close()
+    server.close()
+
+
+def test_context_manager():
+    server = RouterServer(protocol="inproc", interface="localhost",
+                          instances={"TestDevice": TestDevice()}, config=config)
+    server.run()
+    client = RouterClient(protocol="inproc")
+    with client.lock_write_token():
+        print("got write token!")
+    client.close()
+    server.close()
+
+
+def test_context_manager_get_token_after_delay():
+    server = RouterServer(protocol="inproc", interface="localhost",
+                          instances={"TestDevice": TestDevice()}, config=config)
+    server.run()
+    # Create multiple clients.
+    num_clients = 2
+    clients = [RouterClient(protocol="inproc") for _ in range(num_clients)]
+    clients[0].get_write_token()
+    with pytest.raises(PermissionError):
+        with clients[1].lock_write_token(0.1):
+            print("got write token!")
+    for client in clients:
+        client.close()
+    server.close()
+
+
+def test_context_manager_get_token_after_release():
+    server = RouterServer(protocol="inproc", interface="localhost",
+                          instances={"TestDevice": TestDevice()}, config=config)
+    server.run()
+    # Create multiple clients.
+    num_clients = 2
+    clients = [RouterClient(protocol="inproc") for _ in range(num_clients)]
+
+    def client0_do_bounded_work():
+        with clients[0].lock_write_token():
+            print("Client0 got write token!")
+            sleep(0.1)
+
+    # Start client0 task that will eventually give up the write token.
+    client0_task = Thread(target=client0_do_bounded_work, daemon=True).start()
+
+    # Client1 should now wait for write token but eventually get it.
+    with clients[1].lock_write_token(0.2):
+        print("Client1 got write token!")
+
+    for client in clients:
+        client.close()
     server.close()
