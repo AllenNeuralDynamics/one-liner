@@ -44,7 +44,6 @@ def test_many_client_receive():
         received_data0 = clients[0].get_stream("sensor_data", block=True)
         received_data1 = clients[1].get_stream("sensor_data", block=True)
         print(f"received: {received_data0} | {received_data1}")
-    server.close()
     for client in clients:
         client.close()
-    zmq.Context.instance().term()
+    server.close()

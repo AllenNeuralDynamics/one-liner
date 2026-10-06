@@ -112,6 +112,6 @@ def test_get_last_sent_value():
         print(f"Received: {data}")
         assert data == last_element_sent
     finally:
-        client.close()
         server.close()
+        client.close()
         zmq.Context.instance().term()

@@ -68,7 +68,7 @@ def test_get_write_token_after_distributing_it_fails():
     clients = [RouterClient(protocol="inproc") for _ in range(num_clients)]
     clients[0].get_write_token()
     with pytest.raises(PermissionError):
-        clients[1].get_write_token()
+        clients[1].get_write_token(timeout_s=0) # Do not wait.
     for client in clients:
         client.close()
     server.close()
@@ -130,8 +130,8 @@ def test_context_manager_get_token_after_delay():
     clients = [RouterClient(protocol="inproc") for _ in range(num_clients)]
     clients[0].get_write_token()
     with pytest.raises(PermissionError):
-        with clients[1].lock_write_token(0.1):
-            print("got write token!")
+        with clients[1].lock_write_token(timeout_s=0.1):
+            print("This should not print!")
     for client in clients:
         client.close()
     server.close()
@@ -146,7 +146,7 @@ def test_context_manager_get_token_after_release():
     clients = [RouterClient(protocol="inproc") for _ in range(num_clients)]
 
     def client0_do_bounded_work():
-        with clients[0].lock_write_token():
+        with clients[0].lock_write_token(timeout_s=0):
             print("Client0 got write token!")
             sleep(0.1)
 
@@ -154,7 +154,7 @@ def test_context_manager_get_token_after_release():
     client0_task = Thread(target=client0_do_bounded_work, daemon=True).start()
 
     # Client1 should now wait for write token but eventually get it.
-    with clients[1].lock_write_token(0.2):
+    with clients[1].lock_write_token(timeout_s=0.2):
         print("Client1 got write token!")
 
     for client in clients:

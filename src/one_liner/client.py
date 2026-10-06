@@ -4,13 +4,15 @@ import logging
 import pickle
 import zmq
 from contextlib import contextmanager
+from one_liner.errors import RouterServerDisconnectedError
 from one_liner.socket_metadata_schema import Streams
 from one_liner import __version__ as local_version
 from one_liner.utils import Protocol, Encoding, RPCException, StreamException, DESERIALIZERS, _recv
+from threading import Thread, Event
 from time import perf_counter
 from typing import Any, Callable, Literal, Tuple
+from zmq.utils.monitor import recv_monitor_message
 
-WAIT_FOREVER_TIMEOUT = -1
 
 class RouterClient:
 
@@ -64,6 +66,10 @@ class RouterClient:
                                              port=broadcast_port,
                                              context=self._context)
 
+    def is_connected(self):
+        """True if the client is connected to the server."""
+        return self.rpc_client.is_connected()
+
     def call_by_name(self, call_name: str, args: list | None = None,
                      kwargs: dict | None = None,
                      deserializer: Encoding | Callable = "pickle",
@@ -92,6 +98,16 @@ class RouterClient:
             of one of the built-in options.
         timeout_s:
             max time in seconds to wait for a reply before raising a TimeoutError.
+
+        Raises
+        ------
+        RPCException
+            if the remotely-executed function raised an error.
+        TimeoutError
+            if the connected server does not issue a response within the
+            specified timeout.
+        RouterServerDisconnectedError
+            if the associated RouterServer is disconnected
 
         Returns
         -------
@@ -131,6 +147,8 @@ class RouterClient:
         TimeoutError
             if the connected server does not issue a response within the
             specified timeout.
+        RouterServerDisconnectedError
+            if the associated RouterServer is disconnected
 
         Notes
         -----
@@ -149,8 +167,8 @@ class RouterClient:
     def has_write_access(self):
         return self.rpc_client.has_write_access()
 
-    def get_write_token(self, force: bool = False):
-        return self.rpc_client.get_write_token(force=force)
+    def get_write_token(self, force: bool = False, timeout_s: float | None = None):
+        return self.rpc_client.get_write_token(force=force, timeout_s=timeout_s)
 
     def release_write_token(self):
         return self.rpc_client.release_write_token()
@@ -170,8 +188,9 @@ class RouterClient:
         PermissionError:
             if the write token never becomes available before the specified
             timeout.
-        TimeoutError
-            if the server is unresponsive.
+        RouterServerDisconnectedError
+            if the associated RouterServer is disconnected
+
         """
         with self.rpc_client.lock_write_token(timeout_s=timeout_s):
             yield
@@ -309,22 +328,54 @@ class RouterClient:
 class ZMQRPCClient:
 
 
-    __slots__ = ("context", "socket", "_write_token", "log",
-                 "_default_rcv_timeout_ms")
+    __slots__ = ("context", "socket", "monitor_socket", "monitor_thread",
+                 "connected", "_write_token", "log", "_default_rcv_timeout_ms")
+
+    INNER_RECV_POLL_INTERVAL_MS = 500
 
     def __init__(self, protocol: Protocol = "tcp", interface: str = "localhost",
-                 port: str = "5555", context: zmq.Context = None,
-                 timeout_s: float | None = None):
+                 port: str = "5555", context: zmq.Context = None):
         self.log = logging.getLogger(self.__class__.__name__)
         self.context = context or zmq.Context()
         self.socket = self.context.socket(zmq.REQ)
+        ## Setup heartbeat settings
+        self.socket.setsockopt(zmq.HEARTBEAT_IVL, 1000)
+        self.socket.setsockopt(zmq.HEARTBEAT_TIMEOUT, 2000)
+        self.socket.setsockopt(zmq.HEARTBEAT_TTL, 2000)
         self.socket.setsockopt(zmq.LINGER, 0)
-        self._default_rcv_timeout_ms: int = (WAIT_FOREVER_TIMEOUT
-                if timeout_s is None else round(timeout_s * 1000))
-        self.socket.setsockopt(zmq.RCVTIMEO, self._default_rcv_timeout_ms)
+        # Setup a short inner-loop poll interval.
+        self.socket.setsockopt(zmq.RCVTIMEO, self.__class__.INNER_RECV_POLL_INTERVAL_MS)
         address = f"{protocol}://{interface}:{port}"
+        # Get monitor socket before connecting main socket.
+        self.monitor_socket = self.socket.get_monitor_socket(zmq.EVENT_ALL)
+        self.monitor_socket.setsockopt(zmq.LINGER, 0)
+        self.monitor_thread = Thread(target=self._monitor_request_socket, daemon=True)
+        self.monitor_thread.start()
+        self.connected = Event()
+        # Inproc protocol does not see "connected/disconnected" events.
+        if protocol == "inproc":
+            self.connected.set()
         self.socket.connect(address)
         self._write_token = ""
+
+    def _monitor_request_socket(self):
+        """Monitor thread to update the connection state."""
+        while self.monitor_socket.poll(timeout=None, flags=zmq.POLLIN): # wait indefinitely
+            event = recv_monitor_message(self.monitor_socket)
+            event_id = event['event']
+            endpoint = event['endpoint']
+            if event_id == zmq.EVENT_CONNECTED:
+                self.connected.set()
+                self.log.debug(f"Connected to: {endpoint}")
+            elif event_id == zmq.EVENT_DISCONNECTED:
+                self.connected.clear()
+                self.log.warning(f"Disconnected from: {endpoint}")
+            elif event_id == zmq.EVENT_MONITOR_STOPPED:
+                break
+
+    def is_connected(self):
+        """True if the client is connected to the server."""
+        return self.connected.is_set()
 
     def call_by_name(self, call_name: str, args: list = None, kwargs: dict = None,
                      deserializer: Encoding | Callable = "pickle",
@@ -348,55 +399,80 @@ class ZMQRPCClient:
         TimeoutError
             if the connected server does not issue a response within the
             specified timeout.
+        RouterServerDisconnectedError
+            if the associated RouterServer is disconnected
+
         """
-        timeout_ms = round(timeout_s * 1000) if timeout_s is not None else WAIT_FOREVER_TIMEOUT
-        # Apply custom timeout for this message.
-        if timeout_ms != self._default_rcv_timeout_ms:
-            self.socket.setsockopt(zmq.RCVTIMEO, timeout_ms)
         args = [] if args is None else args
         kwargs = {} if kwargs is None else kwargs
         pickled_req = pickle.dumps((self._write_token, obj_name, attr_name, args, kwargs))
         self.socket.send(pickled_req, copy=False)
-        try:
-            success, timestamp, data = _recv(self.socket, deserializer=deserializer)
-        except zmq.Again:
-            error_msg = f"Server did not issue a respose within {float(timeout_ms)/1000} seconds."
-            self.log.error(error_msg)
-            raise TimeoutError(error_msg)
-        # Restore old default timeout
-        if timeout_ms != self._default_rcv_timeout_ms:
-            self.socket.setsockopt(zmq.RCVTIMEO, timeout_ms)
-        if not success:
-            raise RPCException(data) # data contains exception string.
-        return timestamp, data
+        # inner poll loop. Update internal state (i.e: check connection)
+        # outer poll loop. respect the user specified timeout.
+        start_time_s = perf_counter()
+        timeout_elapsed = False
+        while not timeout_elapsed:
+            timeout_elapsed = (False if timeout_s is None else
+                (perf_counter() - start_time_s) > timeout_s)
+            try:
+                success, timestamp, data = _recv(self.socket, deserializer=deserializer)
+                if not success:
+                    raise RPCException(data) # data contains exception string.
+                return timestamp, data
+            except zmq.Again:
+                if not self.is_connected():
+                    error_msg = ("Did not get a reply from called function! "
+                        "Server is disconnected!")
+                    self.log.error(error_msg)
+                    raise RouterServerDisconnectedError(error_msg)
+        error_msg = (f"Server did not issue a respose within {timeout_s} seconds.")
+        self.log.error(error_msg)
+        raise TimeoutError(error_msg)
 
     def get_write_token(self, force: bool = False,
-                        reply_timeout_s: float | None = None):
+                        timeout_s: float | None = None):
         """Request a write token or acquire one by force.
         Idempotent if you already have the valid write token.
+
+        Parameters
+        ----------
+        force:
+            whether to force take the write token
+        timeout_s:
+            if not forcing, how long to wait for the write token before giving up
+            (default is forever). A timeout of 0 will try exactly once.
 
         Raises
         ------
         PermissionError
             if the write token was not acquired.
-        TimeoutError
-            if the server is unresponsive.
+        RouterServerDisconnectedError
+            if the associated RouterServer is disconnected
         """
-        try:
-            self._write_token = self.call("__rpc_server", "_check_or_get_write_token",
-                                          kwargs={"force": force,
-                                                  "curr_write_token": self._write_token},
-                                          timeout_s=reply_timeout_s)[-1]
-        except RPCException:
-            error_msg = "Failed to acquire write token."
-            self.log.warning(error_msg)
-            raise PermissionError(error_msg)
+        timeout_elapsed = False
+        start_time_s = perf_counter()
+        while not timeout_elapsed:
+            timeout_elapsed = (False if timeout_s is None else
+                (perf_counter() - start_time_s) > timeout_s)
+            try:
+                self._write_token = self.call("__rpc_server", "_check_or_get_write_token",
+                    kwargs={"force": force,
+                        "curr_write_token": self._write_token})[-1]
+                break
+            except RPCException:
+                if not timeout_elapsed:
+                    continue
+                error_msg = "Failed to acquire write token."
+                self.log.error(error_msg)
+                raise PermissionError(error_msg)
+            except RouterServerDisconnectedError:
+                self.log.error("Server disconnected while waiting to acquire write token!")
+                raise
 
-    def release_write_token(self, reply_timeout_s: float | None = None):
+    def release_write_token(self):
         try:
-            self.call("__rpc_server", "_release_write_token",
-                      timeout_s=reply_timeout_s)
-        except TimeoutError:
+            self.call("__rpc_server", "_release_write_token")
+        except RouterServerDisconnectedError:
             self.log.error("Failed to return write token! Server is unresponsive.")
             return
         self._write_token = None
@@ -408,7 +484,7 @@ class ZMQRPCClient:
         return self.has_write_token()
 
     @contextmanager
-    def lock_write_token(self, timeout_s: float | None= None):
+    def lock_write_token(self, timeout_s: float | None = None):
         """ Context Manager to get access to the write token.
 
         Parameters
@@ -422,29 +498,11 @@ class ZMQRPCClient:
         PermissionError:
             if the write token never becomes available before the specified
             timeout.
-        TimeoutError
-            if the server is unresponsive.
+        RouterServerDisconnectedError
+            if the associated RouterServer is disconnected
         """
-        # The timeout waiting for a reply from the server is *distinct* from
-        # the timeout waiting for the write token to be available. Prevent
-        # get_write_token() from hanging by making both timeouts match.
         try:
-            start_time_s = perf_counter()
-            timeout_elapsed = False
-            while not self.has_write_token() and not timeout_elapsed:
-                timeout_elapsed = (False if timeout_s is None else
-                    (perf_counter() - start_time_s) > timeout_s)
-                try:
-                    self.get_write_token(reply_timeout_s = timeout_s)
-                # Server rejected request. Another entity has the write token.
-                except PermissionError:
-                    if timeout_elapsed:
-                        raise
-                    continue
-                # Server down and timeout was not infinite.
-                except TimeoutError:
-                    self.log.error("Server connection is down.")
-                    raise
+            self.get_write_token(timeout_s=timeout_s)
             yield
         finally:
             self.release_write_token()
@@ -452,6 +510,9 @@ class ZMQRPCClient:
     def close(self):
         if self.has_write_token():
             self.release_write_token()
+        self.socket.disable_monitor()
+        self.monitor_thread.join()
+        self.monitor_socket.close()
         self.socket.close()
 
 
