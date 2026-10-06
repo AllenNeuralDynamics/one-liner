@@ -38,9 +38,14 @@ class ZMQRPCServer:
         self.named_call_signatures = {}
         self.named_call_access_types = {}
         self.obj_attr_access_types = {}  # Same as above except by obj/attr
-        self._write_token: str = secrets.token_urlsafe()
+        self._write_token: str = self._refresh_token()
         self._write_token_allocated: bool = False
         self._recv_write_token: str = ""  # The most recent request's write token
+
+    @staticmethod
+    def _refresh_token() -> str:
+        """regenerate a token"""
+        return secrets.token_urlsafe()
 
     def run(self):
         """Launch thread to execute RPCs."""
@@ -115,7 +120,7 @@ class ZMQRPCServer:
         """
         if force:
             self.log.debug("Forcing creation of a new write token.")
-            self._write_token = secrets.token_urlsafe()
+            self._write_token = self._refresh_token()
             self._write_token_allocated = True
             return self._write_token
         if curr_write_token == self._write_token:
@@ -129,7 +134,7 @@ class ZMQRPCServer:
 
     def _release_write_token(self):
         self._write_token_allocated = False
-        self._write_token = secrets.token_urlsafe()
+        self._write_token = self._refresh_token()
 
 
     def add_named_call(self, call_name: str,
