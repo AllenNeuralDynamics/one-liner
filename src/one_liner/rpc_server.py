@@ -40,6 +40,7 @@ class ZMQRPCServer:
         self.obj_attr_access_types = {}  # Same as above except by obj/attr
         self._write_token: str = self._refresh_token()
         self._write_token_allocated: bool = False
+        self._write_token_owner: str | None = None
         self._recv_write_token: str = ""  # The most recent request's write token
 
     @staticmethod
@@ -106,7 +107,11 @@ class ZMQRPCServer:
 
         return configuration
 
-    def _check_or_get_write_token(self, curr_write_token: str = None, force: bool = False):
+    def get_write_token_owner(self) -> str | None:
+        return self._write_token_owner
+
+    def _check_or_get_write_token(self, curr_write_token: str = None,
+        force: bool = False, identity: str | None = None):
         """
         Get the write token if not yet allocated and not forced or force
         creation of a new one.
@@ -119,21 +124,25 @@ class ZMQRPCServer:
                 if the token has already been allocated and force=false
         """
         if force:
-            self.log.debug("Forcing creation of a new write token.")
+            self.log.warning("Forcing creation of a new write token.")
             self._write_token = self._refresh_token()
             self._write_token_allocated = True
+            self._write_token_owner = identity
             return self._write_token
         if curr_write_token == self._write_token:
             return self._write_token
         if not self._write_token_allocated:
             self._write_token_allocated = True
+            self._write_token_owner = identity
             return self._write_token
         else:
-            raise PermissionError("Write token already allocated."
-                                  "Cannot reallocate without forcing.")
+            raise PermissionError(
+                f"Write token already allocated to {self._write_token_owner}."
+                "Cannot reallocate without forcing.")
 
     def _release_write_token(self):
         self._write_token_allocated = False
+        self._write_token_owner = None
         self._write_token = self._refresh_token()
 
 

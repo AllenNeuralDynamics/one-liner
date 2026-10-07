@@ -160,3 +160,24 @@ def test_context_manager_get_token_after_release():
     for client in clients:
         client.close()
     server.close()
+
+def test_get_write_token_owner():
+    server = RouterServer(protocol="inproc", interface="localhost",
+                          instances={"TestDevice": TestDevice()}, config=config)
+    server.run()
+    # Create multiple clients.
+    clients = [
+        RouterClient(protocol="inproc", name="Allen"),
+        RouterClient(protocol="inproc", name="Toot")
+    ]
+    assert clients[0].get_write_token_owner() is None, "No one should have the write token."
+    clients[0].get_write_token()
+    assert clients[1].get_write_token_owner() == clients[0].name
+    clients[0].release_write_token()
+    assert clients[0].get_write_token_owner() is None, "write token should be released."
+    clients[0].get_write_token()
+    clients[1].get_write_token(force=True)
+    assert clients[0].get_write_token_owner() == "Toot"
+    for client in clients:
+        client.close()
+    server.close()
