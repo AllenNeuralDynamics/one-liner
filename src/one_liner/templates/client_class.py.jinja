@@ -1,0 +1,25 @@
+# ==============================================================================
+# AUTOMATICALLY GENERATED FILE. DO NOT MODIFY MANUALLY.
+# Generated on {{ generation_date }} by hostname: {{ source_pc }}.
+# To regenerate this file, invoke
+#    generate_interface_class(class_name="{{ class_name}}")
+# from the associated RouterServer.
+# ==============================================================================
+
+from one_liner.client import RouterClient
+
+class {{ class_name }}(RouterClient):
+    # TODO: some init validation here to ensure the remote configuration matches!!
+
+{% for named_call, data in named_calls.items() %}
+    def {{ named_call }}{{data.signature}}:
+        return self.call_by_name(
+            "{{ named_call }}",
+            args=[{{ data.args | join(', ') }}],
+            kwargs={
+            {%- for item in data.kwargs -%}
+                "{{ item }}": {{ item }}{% if not loop.last %}, {% endif %}
+            {%- endfor -%}},
+            deserializer="pickle",
+            timeout_s=None)[-1]
+{% endfor %}
