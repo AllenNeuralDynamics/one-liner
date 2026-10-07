@@ -328,8 +328,8 @@ class RouterClient:
 class ZMQRPCClient:
 
 
-    __slots__ = ("context", "socket", "monitor_socket", "monitor_thread",
-                 "connected", "_write_token", "log", "_default_rcv_timeout_ms")
+    __slots__ = ("context", "socket", "monitor_socket", "monitor_thread", "address",
+                 "_connected", "_write_token", "log", "_default_rcv_timeout_ms")
 
     INNER_RECV_POLL_INTERVAL_MS = 500
 
@@ -345,17 +345,14 @@ class ZMQRPCClient:
         self.socket.setsockopt(zmq.LINGER, 0)
         # Setup a short inner-loop poll interval.
         self.socket.setsockopt(zmq.RCVTIMEO, self.__class__.INNER_RECV_POLL_INTERVAL_MS)
-        address = f"{protocol}://{interface}:{port}"
+        self.address = f"{protocol}://{interface}:{port}"
         # Get monitor socket before connecting main socket.
         self.monitor_socket = self.socket.get_monitor_socket(zmq.EVENT_ALL)
         self.monitor_socket.setsockopt(zmq.LINGER, 0)
         self.monitor_thread = Thread(target=self._monitor_request_socket, daemon=True)
         self.monitor_thread.start()
-        self.connected = Event()
-        # Inproc protocol does not see "connected/disconnected" events.
-        if protocol == "inproc":
-            self.connected.set()
-        self.socket.connect(address)
+        self._connected = Event()
+        self.socket.connect(self.address)
         self._write_token = ""
 
     def _monitor_request_socket(self):
@@ -365,17 +362,21 @@ class ZMQRPCClient:
             event_id = event['event']
             endpoint = event['endpoint']
             if event_id == zmq.EVENT_CONNECTED:
-                self.connected.set()
+                self._connected.set()
                 self.log.debug(f"Connected to: {endpoint}")
             elif event_id == zmq.EVENT_DISCONNECTED:
-                self.connected.clear()
+                self._connected.clear()
                 self.log.warning(f"Disconnected from: {endpoint}")
             elif event_id == zmq.EVENT_MONITOR_STOPPED:
                 break
 
     def is_connected(self):
         """True if the client is connected to the server."""
-        return self.connected.is_set()
+        # Inproc protocol does not see "connected/disconnected" events.
+        if self.address.startswith("inproc"):
+            raise NotImplementedError(
+                "inproc protocol does not see ""connection/disconnection events.")
+        return self._connected.is_set()
 
     def call_by_name(self, call_name: str, args: list = None, kwargs: dict = None,
                      deserializer: Encoding | Callable = "pickle",
