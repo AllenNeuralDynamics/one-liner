@@ -903,6 +903,7 @@ name = "one-liner"
 version = "0.1.1.dev11"
 source = { editable = "." }
 dependencies = [
+    { name = "jinja2" },
     { name = "orjson" },
     { name = "pydantic" },
     { name = "pyzmq" },
@@ -932,6 +933,7 @@ examples = [
 
 [package.metadata]
 requires-dist = [
+    { name = "jinja2", specifier = ">=3.1.6" },
     { name = "orjson", specifier = ">=3.11.4" },
     { name = "pydantic", specifier = ">=2.11.7" },
     { name = "pyzmq", specifier = ">=27.0.2" },
