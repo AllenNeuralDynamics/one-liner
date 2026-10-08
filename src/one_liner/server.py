@@ -12,7 +12,7 @@ from one_liner.socket_metadata_schema import RPC
 
 class RouterServer:
     __slots__ = ("instances", "context", "streamer", "rpc",
-                 "_context_managed_externally")
+                 "_context_managed_externally",)
     """Interface for enabling remote control/monitoring of one or more object
        instances. Heavy lifting is delegated to two subordinate objects."""
 
@@ -20,7 +20,8 @@ class RouterServer:
                  rpc_port: str = "5555", broadcast_port: str = "5556",
                  context: zmq.Context | None = None,
                  instances: dict[str, Any] | None = None,
-                 config: RouterServerConfig | dict[str, dict] | None = None):
+                 config: RouterServerConfig | dict[str, dict] | None = None,
+                 name: str | None = None):
         """ Constructor.
 
         Parameters
@@ -37,6 +38,8 @@ class RouterServer:
             The zmq context. Will be created automatically if unspecified.
         instances : dict
             Dict of object instances, keyed by name.
+        config:
+            optional configuration dict of named calls and streams
 
         Warnings
         --------

@@ -9,8 +9,8 @@ def test_client_receive():
     """Ensure that the same version can be fetched across all one-liner
     components within the same process."""
     server = RouterServer()
-    client = RouterClient()
     server.run()
+    client = RouterClient()
     try:
         assert len({client.version, server.version, client.server_version}) == 1
     finally:
