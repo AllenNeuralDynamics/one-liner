@@ -8,6 +8,7 @@ import zmq
 from datetime import datetime
 from jinja2 import Environment, FileSystemLoader
 from one_liner import __version__ as local_version
+from one_liner.client_gen_utils import format_file_with_ruff
 from one_liner.client import RouterClient
 from one_liner.stream_server import ZMQStreamServer
 from one_liner.rpc_server import ZMQRPCServer
@@ -331,6 +332,9 @@ class RouterServer:
         except SyntaxError:
             raise SyntaxError(f"Class name {class_name} is invalid.")
 
+        # Sanitize output path.
+        output_dir = Path() if output_dir is None else Path(output_dir)
+
         # Create functions for all named calls. Use function signature.
         named_call_signatures = {}
         for named_call, (obj, attr, pre_args, pre_kwargs) in self.rpc.named_call_signatures.items():
@@ -387,9 +391,12 @@ class RouterServer:
         template = env.get_template('client_class.py.jinja')
         rendered_code = template.render(context)
 
-        output_filename = f"{class_name.lower()}_client.py"
+        output_filename = Path(f"{class_name.lower()}_client.py")
         with open(output_filename, 'w', encoding='utf-8') as f:
             f.write(rendered_code)
+
+        self.log.debug(f"formatting file.")
+        format_file_with_ruff(output_dir / output_filename)
 
         self.log.debug(f"Wrote {class_name} class to : {output_filename}")
 

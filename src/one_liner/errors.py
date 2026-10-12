@@ -1,0 +1,2 @@
+class RouterServerDisconnectedError(TimeoutError):
+    pass
