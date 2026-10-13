@@ -2,19 +2,20 @@
 
 import ast
 import inspect
+import getpass
 import logging
 import socket
 import zmq
 from datetime import datetime
 from jinja2 import Environment, FileSystemLoader
 from one_liner import __version__ as local_version
-from one_liner.client_gen_utils import format_file_with_ruff
+from one_liner.client_gen_utils import extract_enums_from_type, format_file_with_ruff, clean_signature_obj
 from one_liner.client import RouterClient
 from one_liner.stream_server import ZMQStreamServer
 from one_liner.rpc_server import ZMQRPCServer
 from one_liner.utils import Protocol, Encoding
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, get_type_hints
 from one_liner.models import AccessType, RouterServerConfig
 from one_liner.socket_metadata_schema import RPC
 
@@ -335,11 +336,20 @@ class RouterServer:
         # Sanitize output path.
         output_dir = Path() if output_dir is None else Path(output_dir)
 
+        # TODO: check for anything not json-serializable (besides enums).
+
+        # Aggregate nested Enums
+        enums = set()
+        for named_call, (obj, attr, pre_args, pre_kwargs) in self.rpc.named_call_signatures.items():
+            func = getattr(self.instances[obj], attr)
+            hints = list(get_type_hints(func).values())
+            for hint in hints:
+                enums |= extract_enums_from_type(hint)
+
         # Create functions for all named calls. Use function signature.
         named_call_signatures = {}
         for named_call, (obj, attr, pre_args, pre_kwargs) in self.rpc.named_call_signatures.items():
             sig = inspect.signature(getattr(self.instances[obj], attr))
-            # TODO: check if any enums or custom objects are hinted. Fail if so.
             # Remove any pre-filled args and kwargs.
             bound_params = sig.bind_partial(*pre_args, **pre_kwargs)
             bound_names = set(bound_params.arguments.keys())
@@ -348,7 +358,7 @@ class RouterServer:
                 param for name, param in sig.parameters.items()
                 if name not in bound_names
             ]
-            # Patch in self separately such that any prefilled args don't remove it.
+            # Patch in "self" separately such that any prefilled args don't remove it.
             self_param = inspect.Parameter(
                 'self',
                 kind=inspect.Parameter.POSITIONAL_OR_KEYWORD
@@ -370,7 +380,7 @@ class RouterServer:
 
             # Return a new Signature without those parameters
             named_call_signatures[named_call] = {
-                "signature": sig.replace(parameters=new_params),
+                "signature": clean_signature_obj(sig.replace(parameters=new_params)),
                 "args": arg_names,
                 "kwargs": kwarg_names
             }
@@ -379,10 +389,12 @@ class RouterServer:
         # Create jinja2 template metadata.
         context = {
             "generation_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "user": getpass.getuser(),
             "source_pc": socket.gethostname(),
             "router_client_signature": inspect.signature(RouterClient.__init__),
             "class_name": f"{class_name}",
             "named_calls": named_call_signatures,
+            "enum_sources": [inspect.getsource(e) for e in enums]
         }
 
         template_dir = Path(__file__).parent.resolve() / "templates"

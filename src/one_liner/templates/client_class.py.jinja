@@ -1,12 +1,19 @@
 # ==============================================================================
 # AUTOMATICALLY GENERATED FILE. DO NOT MODIFY MANUALLY.
-# Generated on {{ generation_date }} by hostname: {{ source_pc }}.
+# Generated on {{ generation_date }} by {{ user }} from host: {{ source_pc }}.
 # To regenerate this file, invoke
 #    generate_interface_class(class_name="{{ class_name}}")
 # from the associated RouterServer.
 # ==============================================================================
 
+{%- if enum_sources %}
+from enum import enum
+{% endif %}
 from one_liner.client import RouterClient
+
+{% for enum_def in enum_sources %}
+{{ enum_def }}
+{% endfor %}
 
 class {{ class_name }}(RouterClient):
     # TODO: some init validation here to ensure the remote configuration matches!!
