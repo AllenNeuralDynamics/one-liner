@@ -10,7 +10,7 @@ from one_liner import __version__ as local_version
 from one_liner.utils import Protocol, Encoding, RPCException, StreamException, DESERIALIZERS, _recv
 from threading import Thread, Event
 from time import perf_counter
-from typing import Any, Callable, Literal, Tuple
+from typing import Any, Callable, List, Literal, Tuple
 from zmq.utils.monitor import recv_monitor_message
 
 
@@ -291,6 +291,9 @@ class RouterClient:
         """
         # Use rpc_client to enable/disable streams.
         return self.rpc_client.call("__streamer", "disable", args=[name])
+
+    def get_all_stream_names(self) -> List[str]:
+        return self.rpc_client.call("__streamer", "get_all_stream_names")[-1]
 
     def get_stream_configurations(self, as_dict: bool = False) -> Streams | dict:
         """Get the configuration for all streams.

@@ -415,6 +415,10 @@ class ZMQStreamServer:
                           zmq_streams=zmq_streams)
         return streams.model_dump() if as_dict else streams
 
+    def get_all_stream_names(self):
+        """return the list of all streams"""
+        return list(self._call_signature.keys())
+
     def close(self):
         """Exit all threads gracefully.
         If manual streams were created, stop sending data via the created handler

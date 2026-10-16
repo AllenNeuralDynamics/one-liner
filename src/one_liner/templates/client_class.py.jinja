@@ -7,7 +7,7 @@
 # ==============================================================================
 
 {%- if enum_sources %}
-from enum import enum
+from enum import Enum
 {% endif %}
 from one_liner.client import RouterClient
 
@@ -16,7 +16,12 @@ from one_liner.client import RouterClient
 {% endfor %}
 
 class {{ class_name }}(RouterClient):
-    # TODO: some init validation here to ensure the remote configuration matches!!
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Setup all streams to cache values by default.
+        for stream_name in self.get_all_stream_names():
+            self.configure_stream(stream_name, storage_type="cache")
 
 {% for named_call, data in named_calls.items() %}
     def {{ named_call }}{{data.signature}}:
@@ -29,4 +34,9 @@ class {{ class_name }}(RouterClient):
             {%- endfor -%}},
             deserializer="pickle",
             timeout_s=None)[-1]
+{% endfor %}
+
+{% for stream_name, data in streams.items() %}
+    def get_{{ data.func_friendly_name }}_stream(self, block: bool = False) -> {{data.formatted_return_hint }}:
+        return self.get_stream("{{ stream_name }}", block=block)[-1]
 {% endfor %}

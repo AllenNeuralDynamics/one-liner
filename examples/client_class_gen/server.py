@@ -1,11 +1,23 @@
 import random
 
 from one_liner.server import RouterServer
+from one_liner.client_gen_utils import create_interface_class
 
 from enum import Enum
+from math import ceil, pi, sin
+from random import randint
 from time import perf_counter, sleep
 
 from pydantic import BaseModel
+
+
+NUM_STREAMS = 3
+MAX_SAMPLE_RATE_HZ = 500
+# Sample sine waves at different rates to produce different streaming threads.
+SAMPLE_RATES_HZ = [
+    randint(ceil(MAX_SAMPLE_RATE_HZ / 3), MAX_SAMPLE_RATE_HZ)
+    for _ in range(NUM_STREAMS)
+]
 
 
 ################################################################################
@@ -70,6 +82,31 @@ class DiscoDevice:
 
 ################################################################################
 #
+#    Streams example
+#
+################################################################################
+
+
+class BoogieWave(BaseModel):
+    sin_wave: float
+    motto: str
+
+
+# Stream with model as return type
+def boogie_wave(
+    frequency_hz, phase_shift: float = 0, motto: str = "Let Dance!"
+) -> BoogieWave:
+    return BoogieWave(
+        sin_wave=sin(2 * pi * frequency_hz * perf_counter() + phase_shift), motto=motto
+    )
+
+
+# Stream with primitive return type
+def sine_t(frequency_hz, phase_shift: float = 0) -> float:
+    return sin(2 * pi * frequency_hz * perf_counter() + phase_shift)
+
+################################################################################
+#
 #    Server Configuration
 #
 ################################################################################
@@ -105,8 +142,22 @@ if __name__ == "__main__":
         "disco_device",
         "add_dancer",
     )
+
+    for i in range(NUM_STREAMS):  # Create a few streams
+         print(
+             f"Adding broadcast: 1hz_boogie_wave[{i}] sampled at {SAMPLE_RATES_HZ[i]} Hz"
+         )
+         # Set sample and signal rates.
+         server.add_stream_from_callable(
+             f"1hz_wave[{i}]",
+             SAMPLE_RATES_HZ[i],
+             sine_t,
+             args=[1, i * 2 * pi / NUM_STREAMS],
+         )
+
+
     try:
-        server.create_interface_class("DiscoDevice")
+        create_interface_class(server, "DiscoDevice")
         server.run()
         while True:
             sleep(1.0)

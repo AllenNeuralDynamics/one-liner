@@ -1,21 +1,12 @@
 """Server for enabling remote control and broadcasting results of periodic function calls."""
 
-import ast
-import inspect
-import getpass
 import logging
-import socket
 import zmq
-from datetime import datetime
-from jinja2 import Environment, FileSystemLoader
 from one_liner import __version__ as local_version
-from one_liner.client_gen_utils import extract_enums_from_type, format_file_with_ruff, clean_signature_obj
-from one_liner.client import RouterClient
 from one_liner.stream_server import ZMQStreamServer
 from one_liner.rpc_server import ZMQRPCServer
 from one_liner.utils import Protocol, Encoding
-from pathlib import Path
-from typing import Any, Callable, get_type_hints
+from typing import Any, Callable
 from one_liner.models import AccessType, RouterServerConfig
 from one_liner.socket_metadata_schema import RPC
 
@@ -322,95 +313,6 @@ class RouterServer:
         sending data.
         """
         self.streamer.remove(name)
-
-    def create_interface_class(self, class_name: str,
-            output_dir: Path | str | None = None):
-        """Generate a python client class for interfacing with all named
-        calls and streams."""
-        # Validate class name:
-        try:
-            ast.parse(f"class {class_name}: pass")
-        except SyntaxError:
-            raise SyntaxError(f"Class name {class_name} is invalid.")
-
-        # Sanitize output path.
-        output_dir = Path() if output_dir is None else Path(output_dir)
-
-        # TODO: check for anything not json-serializable (besides enums).
-
-        # Aggregate nested Enums
-        enums = set()
-        for named_call, (obj, attr, pre_args, pre_kwargs) in self.rpc.named_call_signatures.items():
-            func = getattr(self.instances[obj], attr)
-            hints = list(get_type_hints(func).values())
-            for hint in hints:
-                enums |= extract_enums_from_type(hint)
-
-        # Create functions for all named calls. Use function signature.
-        named_call_signatures = {}
-        for named_call, (obj, attr, pre_args, pre_kwargs) in self.rpc.named_call_signatures.items():
-            sig = inspect.signature(getattr(self.instances[obj], attr))
-            # Remove any pre-filled args and kwargs.
-            bound_params = sig.bind_partial(*pre_args, **pre_kwargs)
-            bound_names = set(bound_params.arguments.keys())
-            # Filter out parameters that were already supplied
-            new_params = [
-                param for name, param in sig.parameters.items()
-                if name not in bound_names
-            ]
-            # Patch in "self" separately such that any prefilled args don't remove it.
-            self_param = inspect.Parameter(
-                'self',
-                kind=inspect.Parameter.POSITIONAL_OR_KEYWORD
-            )
-            new_params  = [self_param] + new_params
-
-            # Create list of arg kwarg names
-            arg_names = []
-            # MUST be passed as keyword arguments (e.g., func(key=value))
-            kwarg_names = []
-            for name, param in sig.parameters.items():
-                if name in bound_names:  # skip pre-filled args/kwargs
-                    continue
-                if param.kind in (inspect.Parameter.POSITIONAL_ONLY,
-                                  inspect.Parameter.POSITIONAL_OR_KEYWORD):
-                    arg_names.append(name)
-                elif param.kind == inspect.Parameter.KEYWORD_ONLY:
-                    kwarg_names.append(name)
-
-            # Return a new Signature without those parameters
-            named_call_signatures[named_call] = {
-                "signature": clean_signature_obj(sig.replace(parameters=new_params)),
-                "args": arg_names,
-                "kwargs": kwarg_names
-            }
-
-        # Create getter functions for all streams.
-        # Create jinja2 template metadata.
-        context = {
-            "generation_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "user": getpass.getuser(),
-            "source_pc": socket.gethostname(),
-            "router_client_signature": inspect.signature(RouterClient.__init__),
-            "class_name": f"{class_name}",
-            "named_calls": named_call_signatures,
-            "enum_sources": [inspect.getsource(e) for e in enums]
-        }
-
-        template_dir = Path(__file__).parent.resolve() / "templates"
-        env = Environment(
-            loader=FileSystemLoader(template_dir))
-        template = env.get_template('client_class.py.jinja')
-        rendered_code = template.render(context)
-
-        output_filename = Path(f"{class_name.lower()}_client.py")
-        with open(output_filename, 'w', encoding='utf-8') as f:
-            f.write(rendered_code)
-
-        self.log.debug(f"formatting file.")
-        format_file_with_ruff(output_dir / output_filename)
-
-        self.log.debug(f"Wrote {class_name} class to : {output_filename}")
 
     @property
     def version(self):
