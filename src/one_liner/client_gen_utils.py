@@ -5,6 +5,7 @@ import inspect
 import logging
 import keyword
 import re
+from signal import Sigmasks
 import socket
 import subprocess
 import types
@@ -145,9 +146,11 @@ def create_interface_class(
         func = getattr(server.instances[obj], attr)
         hints = list(get_type_hints(func).values())
         for hint in hints:
+            # Skip aggregating enums on functions that we can't support
             if not hint_is_builtin_or_enum(hint):
-                raise SyntaxError("Cannot generate client class interface for "
-                    f"non-builtin and non-enum type: {hint}!")
+                continue
+                #raise SyntaxError("Cannot generate client class interface for "
+                #    f"non-builtin and non-enum type: {hint}!")
             enums |= extract_enums_from_type(hint)
 
     # Aggregate stream return types and check for non-primitive and non-enum types.
@@ -155,12 +158,16 @@ def create_interface_class(
     for stream_name, stream_sig in server.streamer._call_signature.items():
         stream_func, _, _ = stream_sig
         sig = inspect.signature(stream_func)
-        hint = sig.return_annotation
-        if not hint_is_builtin_or_enum(hint):
-            raise SyntaxError("Cannot generate client class interface for "
-                f"non-builtin and non-enum type: {hint}!")
+        return_annotation = (sig.return_annotation
+            if sig.return_annotation is not inspect.Signature.empty else None)
+        if not hint_is_builtin_or_enum(return_annotation):
+            msg = (f"Cannot create function that uses parameter of complex "
+                f"type {return_annotation} for stream: {stream_name}")
+            logger.error(msg)
+            continue
+
         streams[stream_name] = {
-            "formatted_return_hint": inspect.formatannotation(sig.return_annotation),
+            "formatted_return_hint": inspect.formatannotation(return_annotation),
             "func_friendly_name": sanitize_stream_name(stream_name)
         }
 
@@ -176,6 +183,22 @@ def create_interface_class(
             param for name, param in sig.parameters.items()
             if name not in bound_names
         ]
+        # Skip functions that have complex parameter types.
+        for name, param in sig.parameters.items():
+            if (not hint_is_builtin_or_enum(param.annotation)
+                and param.annotation is not inspect.Signature.empty):
+                msg = (f"Cannot create function that uses parameter of complex "
+                    f"type {param} for named_call: {named_call}")
+                logger.error(msg)
+                continue
+        # Skip functions that have complex return types.
+        return_annotation = (sig.return_annotation
+            if sig.return_annotation is not inspect.Signature.empty else None)
+        if not hint_is_builtin_or_enum(return_annotation):
+            msg = (f"Cannot create function that uses parameter of complex "
+                f"type {return_annotation} for named_call: {named_call}")
+            logger.error(msg)
+            continue
         # Patch in "self" separately such that any prefilled args don't remove it.
         self_param = inspect.Parameter(
             'self',
