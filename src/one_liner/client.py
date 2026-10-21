@@ -467,7 +467,7 @@ class ZMQRPCClient:
             timeout_elapsed = (False if timeout_s is None else
                 (perf_counter() - start_time_s) > timeout_s)
             try:
-                self._write_token = self.call("__rpc_server", "_check_or_get_write_token",
+                self._write_token = self.call("__rpc_server", "_get_write_token",
                     kwargs={"force": force,
                         "curr_write_token": self._write_token,
                         "identity": self.name})[-1]
@@ -505,7 +505,11 @@ class ZMQRPCClient:
         self._write_token = None
 
     def has_write_token(self):
-        return True if self._write_token else False
+        if self._write_token is None:
+            return False
+        # Ask the server if the current write token is still valid.
+        return self.call("__rpc_server", "check_write_token",
+            kwargs={"input_write_token": self._write_token})[-1]
 
     def has_write_access(self):
         return self.has_write_token()

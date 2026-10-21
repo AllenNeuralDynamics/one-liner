@@ -85,10 +85,10 @@ def test_force_get_write_token():
     clients[0].call_by_name("zmq_func_1", args=[1, 2])  # Should work with write token access.
     clients[1].get_write_token(force=True)
     assert clients[1].has_write_token() is True
-    # Unfortunately, force-getting the write token doesn't tell the og client
-    # that it doesn't have the write token anymore.
-    # Write tokens will be different.
+    # Ensure server generated a new write token.
     assert clients[0].rpc_client._write_token != clients[1].rpc_client._write_token
+    # Original client should be able to detect that it lost the write token.
+    assert clients[0].has_write_token() is False
     # Next "set" function with defunct write token will no longer work.
     with pytest.raises(RPCException):
         clients[0].call_by_name("zmq_func_1", args=[1, 2])
