@@ -135,13 +135,15 @@ class ZMQRPCServer:
                 if the token has already been allocated and force=false
         """
         if force:
-            self.log.warning("Forcing creation of a new write token.")
             self._write_token = self._refresh_token()
             self._write_token_owner = identity
+            self.log.warning("Forcing creation of a new write token.")
+            self.log.warning(f"FORCE allocating write token to {identity}.")
             return self._write_token
         if not self._write_token_allocated():
             self._write_token_owner = identity
             self._write_token = self._refresh_token()
+            self.log.debug(f"Allocating write token to {identity}.")
             return self._write_token
         if curr_write_token == self._write_token:
             return self._write_token
@@ -153,6 +155,9 @@ class ZMQRPCServer:
         """Untrack the current write token owner. This function should only be
         called by clients who have the write token or by the server itself.
         """
+        msg = "Unallocating write token" + (f" from {self._write_token_owner}."
+            if self._write_token_owner is not None else ".")
+        self.log.debug(msg)
         self._write_token_owner = None
         self._write_token = None # de-allocates write token.
 
