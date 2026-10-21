@@ -43,6 +43,14 @@ class ZMQRPCServer:
         self._write_token_owner: str | None = None
         self._recv_write_token: str = ""  # The most recent request's write token
 
+        # Make releasing the write token a named call so it respects write access
+        # i.e: non-token owners cannot release the write token.
+        self.add_named_call(
+            "__release_write_token",
+            "__rpc_server",
+            "_release_write_token",
+            access_type="set")
+
     @staticmethod
     def _refresh_token() -> str:
         """regenerate a token"""
@@ -110,7 +118,7 @@ class ZMQRPCServer:
     def get_write_token_owner(self) -> str | None:
         return self._write_token_owner
 
-    def _check_or_get_write_token(self, curr_write_token: str = None,
+    def _check_or_get_write_token(self, curr_write_token: str | None = None,
         force: bool = False, identity: str | None = None):
         """
         Get the write token if not yet allocated and not forced or force
@@ -141,10 +149,11 @@ class ZMQRPCServer:
                 "Cannot reallocate without forcing.")
 
     def _release_write_token(self):
+        if not self._write_token_allocated:
+            return
         self._write_token_allocated = False
         self._write_token_owner = None
         self._write_token = self._refresh_token()
-
 
     def add_named_call(self, call_name: str,
                        obj_name: str, attr_name: str,
