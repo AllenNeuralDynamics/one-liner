@@ -48,7 +48,8 @@ def rpc_configs():
 
 
 def test_all_registered_calls_are_returned(rpc_configs):
-    assert set(rpc_configs) == {"rpc", "rpc_with_params", "rpc_annotated"}
+    # Use subset check because rpc config includes built-in extra named calls.
+    assert {"rpc", "rpc_with_params", "rpc_annotated"} <= set(rpc_configs)
 
 
 def test_self_is_stripped_from_params(rpc_configs):
