@@ -486,7 +486,7 @@ class ZMQRPCClient:
     def release_write_token(self):
         # Idempotent Case:
         if self._write_token is None:
-            self.log.error("Cannot release write token. No token to release.")
+            self.log.error("No write token to release.")
             return
         try:
             # This named call will raise an exception if the write token is
@@ -539,15 +539,13 @@ class ZMQRPCClient:
             self.release_write_token()
 
     def close(self):
-        # Unclaim server-side write token state.
-        if self.has_write_token():
-            try:
-                self.release_write_token()
+        try:
+            self.release_write_token()  # Idempotent
             # Don't raise these errors when trying to close:
             # * if another client force-claimed write token
             # * if the server is down
-            except (PermissionError, RouterServerDisconnectedError):
-                pass
+        except (PermissionError, RouterServerDisconnectedError):
+            pass
         self.socket.disable_monitor()
         self.monitor_thread.join()
         self.monitor_socket.close()
