@@ -1,6 +1,6 @@
 [project]
 name = "one_liner"
-version = "0.1.1.dev11"
+version = "0.1.1.dev13"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -8,6 +8,7 @@ dependencies = [
     "orjson>=3.11.4",
     "pydantic>=2.11.7",
     "pyzmq>=27.0.2",
+    "tenacity>=9.2.1",
 ]
 
 [dependency-groups]
