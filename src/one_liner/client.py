@@ -9,7 +9,7 @@ from one_liner.socket_metadata_schema import Streams
 from one_liner import __version__ as local_version
 from one_liner.utils import Protocol, Encoding, RPCException, StreamException, DESERIALIZERS, _recv
 from threading import Thread, Event
-from time import perf_counter
+from time import perf_counter, sleep
 from typing import Any, Callable, Literal, Tuple
 from zmq.utils.monitor import recv_monitor_message
 
@@ -338,6 +338,7 @@ class ZMQRPCClient:
                  "name", "_connected", "_write_token", "log", "_default_rcv_timeout_ms")
 
     INNER_RECV_POLL_INTERVAL_MS = 500
+    WRITE_TOKEN_RETRY_INTERVAL_S = 0.1
 
     def __init__(self, protocol: Protocol = "tcp", interface: str = "localhost",
                  port: str = "5555", context: zmq.Context = None, name: str = None):
@@ -360,7 +361,7 @@ class ZMQRPCClient:
         self.monitor_thread.start()
         self._connected = Event()
         self.socket.connect(self.address)
-        self._write_token = ""
+        self._write_token = None
 
     def _monitor_request_socket(self):
         """Monitor thread to update the connection state."""
@@ -466,13 +467,14 @@ class ZMQRPCClient:
             timeout_elapsed = (False if timeout_s is None else
                 (perf_counter() - start_time_s) > timeout_s)
             try:
-                self._write_token = self.call("__rpc_server", "_check_or_get_write_token",
+                self._write_token = self.call("__rpc_server", "_get_write_token",
                     kwargs={"force": force,
                         "curr_write_token": self._write_token,
                         "identity": self.name})[-1]
                 break
             except RPCException:
                 if not timeout_elapsed:
+                    sleep(self.__class__.WRITE_TOKEN_RETRY_INTERVAL_S)
                     continue
                 error_msg = "Failed to acquire write token."
                 self.log.error(error_msg)
@@ -482,15 +484,32 @@ class ZMQRPCClient:
                 raise
 
     def release_write_token(self):
+        # Idempotent Case:
+        if self._write_token is None:
+            self.log.error("No write token to release.")
+            return
         try:
-            self.call("__rpc_server", "_release_write_token")
+            # This named call will raise an exception if the write token is
+            # invalid because it has "set" access_type.
+            self.call_by_name("__release_write_token")
+        except RPCException:
+            msg = "Cannot release the write token! Token owner has changed!"
+            self.log.error(msg)
+            raise PermissionError(msg)
         except RouterServerDisconnectedError:
             self.log.error("Failed to return write token! Server is unresponsive.")
+            # Consider whether we should still be releasing the write token
+            # in this case.... Holding onto it for an intermittent connection
+            # still seems like the best strategy here.
             return
         self._write_token = None
 
     def has_write_token(self):
-        return True if self._write_token else False
+        if self._write_token is None:
+            return False
+        # Ask the server if the current write token is still valid.
+        return self.call("__rpc_server", "check_write_token",
+            kwargs={"input_write_token": self._write_token})[-1]
 
     def has_write_access(self):
         return self.has_write_token()
@@ -520,8 +539,13 @@ class ZMQRPCClient:
             self.release_write_token()
 
     def close(self):
-        if self.has_write_token():
-            self.release_write_token()
+        try:
+            self.release_write_token()  # Idempotent
+            # Don't raise these errors when trying to close:
+            # * if another client force-claimed write token
+            # * if the server is down
+        except (PermissionError, RouterServerDisconnectedError):
+            pass
         self.socket.disable_monitor()
         self.monitor_thread.join()
         self.monitor_socket.close()

@@ -85,10 +85,10 @@ def test_force_get_write_token():
     clients[0].call_by_name("zmq_func_1", args=[1, 2])  # Should work with write token access.
     clients[1].get_write_token(force=True)
     assert clients[1].has_write_token() is True
-    # Unfortunately, force-getting the write token doesn't tell the og client
-    # that it doesn't have the write token anymore.
-    # Write tokens will be different.
+    # Ensure server generated a new write token.
     assert clients[0].rpc_client._write_token != clients[1].rpc_client._write_token
+    # Original client should be able to detect that it lost the write token.
+    assert clients[0].has_write_token() is False
     # Next "set" function with defunct write token will no longer work.
     with pytest.raises(RPCException):
         clients[0].call_by_name("zmq_func_1", args=[1, 2])
@@ -161,6 +161,7 @@ def test_context_manager_get_token_after_release():
         client.close()
     server.close()
 
+
 def test_get_write_token_owner():
     server = RouterServer(protocol="inproc", interface="localhost",
                           instances={"TestDevice": TestDevice()}, config=config)
@@ -180,4 +181,77 @@ def test_get_write_token_owner():
     assert clients[0].get_write_token_owner() == "Toot"
     for client in clients:
         client.close()
+    server.close()
+
+
+def test_closing_client_also_releases_token():
+    server = RouterServer(protocol="inproc", interface="localhost",
+                          instances={"TestDevice": TestDevice()}, config=config)
+    server.run()
+    client = RouterClient(protocol="inproc", name="Allen")
+    client.get_write_token()
+    client.close() # Closing should release the write token.
+    assert client.has_write_token() is False
+    server.close()
+
+
+def test_rerelease_write_token_as_token_owner():
+    server = RouterServer(protocol="inproc", interface="localhost",
+                          instances={"TestDevice": TestDevice()}, config=config)
+    server.run()
+    client = RouterClient(protocol="inproc", name="Allen")
+    client.get_write_token()
+    # Idempotent check: Multiple releases as token owner should not raise errors.
+    for i in range(3):
+        client.release_write_token()
+    client.close()
+    server.close()
+
+
+def test_rerelease_write_token_as_non_token_owner():
+    server = RouterServer(protocol="inproc", interface="localhost",
+                          instances={"TestDevice": TestDevice()}, config=config)
+    server.run()
+    # Create multiple clients.
+    clients = [
+        RouterClient(protocol="inproc", name="Allen"),
+        RouterClient(protocol="inproc", name="Toot")
+    ]
+    clients[0].get_write_token()
+    # Idempotent check: Multiple releases as token non-owner should not raise errors.
+    for i in range(3):
+        clients[1].release_write_token()
+    for client in clients:
+        client.close()  # Token owner will release upon close.
+    server.close()
+
+
+def test_reget_write_token_as_token_owner():
+    server = RouterServer(protocol="inproc", interface="localhost",
+                          instances={"TestDevice": TestDevice()}, config=config)
+    server.run()
+    client = RouterClient(protocol="inproc", name="Allen")
+    # Idempotent check: Multiple gets as token owner should not raise errors.
+    for i in range(3):
+        client.get_write_token()
+    client.close()
+    server.close()
+
+
+def test_reget_write_token_as_non_token_owner():
+    server = RouterServer(protocol="inproc", interface="localhost",
+                          instances={"TestDevice": TestDevice()}, config=config)
+    server.run()
+    # Create multiple clients.
+    clients = [
+        RouterClient(protocol="inproc", name="Allen"),
+        RouterClient(protocol="inproc", name="Toot")
+    ]
+    clients[0].get_write_token()
+    # Idempotent check: Multiple releases as token non-owner should not raise errors.
+    for i in range(3):
+        with pytest.raises(PermissionError):
+            clients[1].get_write_token(timeout_s=0)  # Do not wait.
+    for client in clients:
+        client.close()  # Token owner will release upon close.
     server.close()
