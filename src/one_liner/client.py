@@ -9,13 +9,8 @@ from one_liner.socket_metadata_schema import Streams
 from one_liner import __version__ as local_version
 from one_liner.utils import Protocol, Encoding, RPCException, StreamException, DESERIALIZERS, _recv
 from threading import Thread, Event
-<<<<<<< HEAD
-from time import perf_counter
-from typing import Any, Callable, List, Literal, Tuple
-=======
 from time import perf_counter, sleep
-from typing import Any, Callable, Literal, Tuple
->>>>>>> main
+from typing import Any, Callable, List, Literal, Tuple
 from zmq.utils.monitor import recv_monitor_message
 
 
@@ -176,12 +171,9 @@ class RouterClient:
     def has_write_access(self):
         return self.rpc_client.has_write_access()
 
-<<<<<<< HEAD
-=======
     def get_write_token_owner(self) -> str | None:
         return self.rpc_client.get_write_token_owner()
 
->>>>>>> main
     def get_write_token(self, force: bool = False, timeout_s: float | None = None):
         return self.rpc_client.get_write_token(force=force, timeout_s=timeout_s)
 
