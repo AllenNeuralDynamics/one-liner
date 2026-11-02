@@ -1,0 +1,42 @@
+name: Check version
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  check-version:
+    name: Stable version tag is unused
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Get stable version
+        id: stable_version
+        run: |
+          version=$(uv version --bump stable --dry-run --short)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check if stable version tag exists
+        id: check_tag
+        uses: mukunku/tag-exists-action@v1.6.0
+        with:
+          tag: v${{ steps.stable_version.outputs.version }}
+
+      - name: Reject an already released stable version
+        if: steps.check_tag.outputs.exists == 'true'
+        env:
+          STABLE_VERSION: ${{ steps.stable_version.outputs.version }}
+        run: |
+          echo "::error::Tag v${STABLE_VERSION} already exists. Update project.version in pyproject.toml to target an unreleased stable version."
+          exit 1
