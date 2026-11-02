@@ -4,12 +4,9 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
-jobs: 
+jobs:
   extract_info:
     runs-on: windows-latest
     outputs:
@@ -31,7 +28,7 @@ jobs:
         echo "PACKAGE_VERSION=$version" >> $env:GITHUB_OUTPUT
         echo "PACKAGE_NAME=$package_name" >> $env:GITHUB_OUTPUT
         echo "PACKAGE_NAME_UNDERSCORES=$package_name".Replace('-', '_') >> $env:GITHUB_OUTPUT
-        
+
     - name: Check if tag exists
       id: check_existing_tag
       uses: mukunku/tag-exists-action@v1.6.0
@@ -51,7 +48,7 @@ jobs:
 
     - name: Install dependencies
       run: uv sync
-        
+
     - name: Create Git tag
       run: |
         git config --global user.name "github-actions[bot]"
@@ -123,7 +120,7 @@ jobs:
   #       with:
   #         packages-dir: dist/
   #         password: ${{ secrets.AIND_PYPI_TOKEN }}
-  
+
   build-docs:
     needs: extract_info
     runs-on: ubuntu-latest
@@ -145,7 +142,7 @@ jobs:
     - uses: astral-sh/setup-uv@v5
       with:
         enable-cache: true
-           
+
     - name: Install dependencies
       run: uv sync --group docs
 
@@ -156,7 +153,7 @@ jobs:
       uses: actions/upload-pages-artifact@v3
       with:
         path: site
-        
+
     - name: Deploy to GitHub Pages
       id: deployment
       uses: actions/deploy-pages@v4
