@@ -1,5 +1,6 @@
 """Server for enabling remote control and broadcasting results of periodic function calls."""
 
+import logging
 import zmq
 from one_liner import __version__ as local_version
 from one_liner.stream_server import ZMQStreamServer
@@ -12,7 +13,7 @@ from one_liner.socket_metadata_schema import RPC
 
 class RouterServer:
     __slots__ = ("instances", "context", "streamer", "rpc",
-                 "_context_managed_externally",)
+                 "_context_managed_externally", "log")
     """Interface for enabling remote control/monitoring of one or more object
        instances. Heavy lifting is delegated to two subordinate objects."""
 
@@ -54,6 +55,7 @@ class RouterServer:
         For the `protocol` setting, some options are system-dependent
         (i.e: `ipc` is for unix-like OSes only).
         """
+        self.log = logging.getLogger(self.__class__.__name__)
         self.context = context or zmq.Context.instance()
         self._context_managed_externally = ((context is not None) or
                                             (self.context is zmq.Context.instance()))
@@ -159,7 +161,6 @@ class RouterServer:
         self.streamer.add(name=stream_name, frequency_hz=frequency_hz,
                           func=func, args=args, kwargs=kwargs,
                           enabled=enabled, serializer=serializer)
-
 
     def add_stream_from_callable(self, stream_name: str, frequency_hz: float,
                    func: Callable, args: list = None, kwargs: dict = None,
