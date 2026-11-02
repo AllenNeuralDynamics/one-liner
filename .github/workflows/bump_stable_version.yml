@@ -1,0 +1,52 @@
+name: Bump Version to Stable
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+jobs:
+  bump-version:
+    # Only run if the PR was actually merged, not closed without merging
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: Bump version to stable
+        id: bump
+        run: |
+          # Bump the version using uv
+          uv version --bump stable
+          
+          # Extract the new version from pyproject.toml
+          NEW_VERSION=$(uv version --output-format json | jq -r .version)
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # Only commit if changes exist
+          if git diff --quiet pyproject.toml; then
+            echo "No version change detected."
+          else
+            git add pyproject.toml
+            git commit -m "chore(release): bump version to ${{ steps.bump.outputs.new_version }}"
+            git push origin main
+          fi
