@@ -17,6 +17,7 @@ jobs:
       project_version: ${{ steps.get_info.outputs.PACKAGE_VERSION }}
       project_name_underscores: ${{ steps.get_info.outputs.PACKAGE_NAME_UNDERSCORES }}
       tag_already_exists: ${{ steps.check_existing_tag.outputs.exists }}
+      is_stable: ${{ steps.check_stable.outputs.is_stable }}
     steps:
     - uses: actions/checkout@v4
     - uses: astral-sh/setup-uv@v5
@@ -38,10 +39,31 @@ jobs:
       with:
         tag: v${{ steps.get_info.outputs.PACKAGE_VERSION }}
 
+    - name: Check if version number is prerelease or stable
+      id: check_stable
+      env:
+        VERSION_TO_CHECK: ${{ steps.get_info.outputs.PACKAGE_VERSION }}
+      run: |
+        # Use uv & Python to accurately parse the PEP 440 prerelease status
+        $is_pre = uv run python -c "from packaging.version import Version; print(Version('$env:VERSION_TO_CHECK').is_prerelease)"
+        
+        if ($is_pre -eq "True") {
+            (echo "is_stable=false") >> $env:GITHUB_OUTPUT
+            echo "Prerelease version detected"
+        } else {
+            (echo "is_stable=true") >> $env:GITHUB_OUTPUT
+            echo "Stable version detected"
+        }
 
   tag:
     needs: extract_info
-    if: needs.extract_info.outputs.tag_already_exists == 'false'
+    # Rules: Tag must not exist AND (Stable + main OR Prerelease + not main)
+    if: |
+      needs.extract_info.outputs.tag_already_exists == 'false' && 
+      (
+        (needs.extract_info.outputs.is_stable == 'true' && github.ref == 'refs/heads/main') ||
+        (needs.extract_info.outputs.is_stable == 'false' && github.ref != 'refs/heads/main')
+      )
     runs-on: windows-latest
     steps:
     - uses: actions/checkout@v4
