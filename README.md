@@ -331,11 +331,21 @@ Doing so prevents topic collisions.
 > Example: topics `new_frame` and `new_frame_2`. When the data from topic `new_frame` starts with `_2`, that data would be erroneously routed to topic `new_frame_2`.
 > To prevent this situation, all topics are represented as null-terminated strings.
 
-## Package/Project Management
+## Contributing
+
+### Package/Project Management
 
 This project utilizes [uv](https://docs.astral.sh/uv/) to handle installing dependencies as well as setting up environments for this project. It replaces tool like pip, poetry, virtualenv, and conda.
 
 This project also uses [tox](https://tox.wiki/en/latest/index.html) for orchestrating multiple testing environments that mimics the github actions CI/CD so that you can test the workflows locally on your machine before pushing changes.
+
+Testing is done with pytest. Use `uv run pytest tests/` to run tests.
+
+### Making PRs
+
+This repo uses a feature branch git workflow. To contribute, make a feature branch and open a PR to main. Bumping the version on a feature branch (with a [prerelease version number](https://packaging.python.org/en/latest/specifications/version-specifiers/#pre-releases)) will tag and publish a prerelease. Merging a PR to main is blocked until the version on the feature branch is changed. 
+
+When a PR is merged to main, the version will automatically be bumped (using `uv version --bump stable`) to remove the prerelease suffix; e.g. "1.2.3.dev4" -> "1.2.3". This will also tag and publish a stable release.
 
 ## Documentation
 ### Environment Setup
