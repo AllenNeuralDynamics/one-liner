@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.11"
 
 [[package]]
@@ -900,7 +900,7 @@ wheels = [
 
 [[package]]
 name = "one-liner"
-version = "0.1.1.dev16"
+version = "0.1.1.dev17"
 source = { editable = "." }
 dependencies = [
     { name = "orjson" },
