@@ -4,10 +4,11 @@ import pickle
 
 import secrets
 import zmq
+from concurrent.futures import ThreadPoolExecutor
 from one_liner.utils import _send, Protocol, get_func_sig_json_schema
 from one_liner.models import AccessType
 from one_liner.socket_metadata_schema import RPC
-from threading import Thread, Event
+from threading import Thread, Event, get_ident
 from typing import Any
 
 
@@ -15,6 +16,8 @@ class ZMQRPCServer:
     """Remote Procedure Caller (RPC) Server. Call any method from a dict of
     object instances, and dispatch the serialized result to the connected
     RPC Client."""
+
+    NUM_RECEIVE_THREADS = 8
 
     def __init__(self, protocol: Protocol = "tcp", interface: str = "*",
                  port: str = "5555", context: zmq.Context = None,
@@ -24,15 +27,25 @@ class ZMQRPCServer:
         self.context = context or zmq.Context.instance()
         self._context_managed_externally = ((context is not None) or
                                             (self.context is zmq.Context.instance()))
-        self.socket = self.context.socket(zmq.REP)
-        self.socket.setsockopt(zmq.RCVTIMEO, 100)  # timeout for recv() in [ms].
-                                                   # >0 but value is kinda arbitrary.
-        self.socket.setsockopt(zmq.LINGER, 0)  # close immediately when context terminates
-        address = f"{protocol}://{interface}:{self.port}"
-        self.socket.bind(address)
+        # Create a pool of threads and sockets available to receive requests.
+        self._threadpool: ThreadPoolExecutor | None = None
+        self._recv_sockets = []
+        for i in range(self.__class__.NUM_RECEIVE_THREADS):
+            socket = self.context.socket(zmq.REP)
+            socket.setsockopt(zmq.RCVTIMEO, 100)  # timeout for recv() in [ms].
+                                              # >0 but value is kinda arbitrary.
+            socket.setsockopt(zmq.LINGER, 0)  # close immediately when context terminates
+            self._recv_sockets.append(socket)
+        self._address = f"{protocol}://{interface}:{self.port}"
+        self._worker_address = f"inproc://workers:{id(self)}"  # unique per instance
         self._keep_receiving = Event()
         self._keep_receiving.set()
-        self._receive_thread: Thread = None
+        self._proxy_thread: Thread | None = None
+        self._rpc_proxy_ctrl_socket = self.context.socket(zmq.REP)
+        self._rpc_proxy_ctrl_socket.setsockopt(zmq.LINGER, 0)
+        self._rpc_proxy_ctrl_address = f"inproc://rpc_proxy_control:{id(self)}"
+        self._rpc_proxy_ctrl_socket.bind(self._rpc_proxy_ctrl_address)
+
         self.instances: dict[str, Any] = {} if instances is None else instances
         self.instances.update({"__rpc_server": self})
         self.named_call_signatures = {}
@@ -58,18 +71,41 @@ class ZMQRPCServer:
     def run(self):
         """Launch thread to execute RPCs."""
         self._keep_receiving.set()
-        self._receive_thread = Thread(target=self._receive_worker,
-                                     name=f"REQ_receive_worker",
-                                     daemon=True)
-        self._receive_thread.start()
+        # Launch ROUTER-DEALER ZMQ Proxy
+        self._proxy_thread = Thread(target=self._proxy_worker,
+            name=f"ROUTER_DEALER_proxy_worker",
+            daemon=True)
+        self._proxy_thread.start()
+        # Launch receive worker threads.
+        self._threadpool = ThreadPoolExecutor(
+            max_workers=self.__class__.NUM_RECEIVE_THREADS)
+        for i in range(self.__class__.NUM_RECEIVE_THREADS):
+            # Will block until the proxy is up.
+            self._recv_sockets[i].connect(self._worker_address)
+            self._threadpool.submit(self._receive_worker, self._recv_sockets[i])
 
-    def _receive_worker(self):
+
+    def _proxy_worker(self):
+        """Create the steerable zmq proxy."""
+        frontend = self.context.socket(zmq.ROUTER)
+        frontend.setsockopt(zmq.LINGER, 0) # Close as soon as the context terminates.
+        frontend.bind(self._address)
+        backend = self.context.socket(zmq.DEALER)
+        backend.setsockopt(zmq.LINGER, 0) # Close as soon as the context terminates.
+        backend.bind(self._worker_address)
+        # Does not return.
+        zmq.proxy_steerable(frontend, backend, control=self._rpc_proxy_ctrl_socket)
+        self.log.debug("RPC proxy exited.")
+
+    def _receive_worker(self, socket):
         """Wait for requests, call requested function, and return the reply.
         Launched in a thread.
         """
+        thread_id = get_ident()
+        self.log.debug(f"Starting Worker thread {thread_id}")
         while self._keep_receiving.is_set():
             try:
-                pickled_request = self.socket.recv()
+                pickled_request = socket.recv()
             except zmq.Again:
                 continue
             request = pickle.loads(pickled_request)
@@ -80,9 +116,9 @@ class ZMQRPCServer:
             try:
                 reply = self._call(obj_name=obj_name, attr_name=attr_name,
                                    args=args, kwargs=kwargs)
-                _send(self.socket, name="", data=reply, success=True)
+                _send(socket, name="", data=reply, success=True)
             except Exception as e:
-                _send(self.socket, name="", data=str(e), success=False)
+                _send(socket, name="", data=str(e), success=False)
 
     def _get_rpc_from_named_calls(self, named_call: str) -> RPC:
         """
@@ -288,10 +324,18 @@ class ZMQRPCServer:
             raise e
 
     def close(self):
-        self._keep_receiving.clear()
-        # _receive_thread is only created by run(); may be None if never started.
-        if self._receive_thread is not None:
-            self._receive_thread.join()
-        self.socket.close()
+        # _threadpool is only created by run(); may be None if never started.
+        if self._threadpool:
+            self._keep_receiving.clear()
+            self._threadpool.shutdown(wait=True)
+        if self._proxy_thread and self._proxy_thread.is_alive():
+            # Create a one-off socket to shutdown the proxy.
+            stream_proxy_ctrl_socket = self.context.socket(zmq.REQ)
+            stream_proxy_ctrl_socket.setsockopt(zmq.LINGER, 0)
+            stream_proxy_ctrl_socket.connect(self._rpc_proxy_ctrl_address)
+            stream_proxy_ctrl_socket.send_string("TERMINATE")
+            stream_proxy_ctrl_socket.recv() # Wait for empty reply to confirm.
+            stream_proxy_ctrl_socket.close()
+            self._proxy_thread.join()
         if not self._context_managed_externally:
             self.context.term()

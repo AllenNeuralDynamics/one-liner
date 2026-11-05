@@ -4,7 +4,8 @@ import logging
 import pickle
 import zmq
 
-from collections import deque, Iterator
+from collections import deque
+from collections.abc import Iterator
 from contextlib import contextmanager
 from one_liner.errors import RouterServerDisconnectedError
 from one_liner.utils import Protocol, Encoding, RPCException, _recv
@@ -59,7 +60,7 @@ class ZMQRPCClient:
         self._connected = Event()
         # Connect all sockets.
         for socket in self._socket_pool_fifo:
-            self.socket.connect(self.address)
+            socket.connect(self.address)
 
     def _monitor_request_socket(self):
         """Monitor thread to update the connection state."""
@@ -123,10 +124,11 @@ class ZMQRPCClient:
                 timeout_elapsed = (False if timeout_s is None else
                     (perf_counter() - start_time_s) > timeout_s)
                 try:
-                    success, timestamp, data = _recv(self.socket, deserializer=deserializer)
-                    if not success:
-                        raise RPCException(data) # data contains exception string.
-                    return timestamp, data
+                    with self._get_idle_socket() as socket:
+                        success, timestamp, data = _recv(socket, deserializer=deserializer)
+                        if not success:
+                            raise RPCException(data) # data contains exception string.
+                        return timestamp, data
                 except zmq.Again:
                     if not self.is_connected():
                         error_msg = ("Did not get a reply from called function! "
@@ -137,6 +139,7 @@ class ZMQRPCClient:
             self.log.error(error_msg)
             raise TimeoutError(error_msg)
 
+    # FIXME: consider a threadpool instead.
     @contextmanager
     def _get_idle_socket(self) -> Iterator[zmq.Socket]:
         """Get an idle socket for the requesting thread. Block until a socket
