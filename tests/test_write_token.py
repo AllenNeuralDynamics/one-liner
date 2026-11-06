@@ -1,4 +1,3 @@
-import logging
 from one_liner.utils import RPCException
 import pytest
 from one_liner.server import RouterServer
@@ -92,8 +91,10 @@ def test_force_get_write_token():
     # Next "set" function with defunct write token will no longer work.
     with pytest.raises(RPCException):
         clients[0].call_by_name("zmq_func_1", args=[1, 2])
+    print("closing clients")
     for client in clients:
         client.close()
+    print("done closing clients")
     server.close()
 
 

@@ -20,8 +20,8 @@ class ZMQRPCServer:
     NUM_RECEIVE_THREADS = 8
 
     def __init__(self, protocol: Protocol = "tcp", interface: str = "*",
-                 port: str = "5555", context: zmq.Context = None,
-                 instances: dict[str, Any] = None):
+                 port: str = "5555", context: zmq.Context | None = None,
+                 instances: dict[str, Any] | None = None):
         self.log = logging.getLogger(self.__class__.__name__)
         self.port = port
         self.context = context or zmq.Context.instance()
