@@ -31,7 +31,7 @@ class ZMQRPCClient:
                  name: str | None = None):
         self.log = logging.getLogger(self.__class__.__name__)
         self.context = context or zmq.Context()
-        self.name = name #if name is not None else self.socket.getsockopt(zmq.IDENTITY)
+        self.name = name
         self._write_token = None
         self._socket_allocator_lock = Lock()
         # Setup socket pool for handling concurrent requests and routing them
@@ -138,7 +138,6 @@ class ZMQRPCClient:
             self.log.error(error_msg)
             raise TimeoutError(error_msg)
 
-    # FIXME: consider a threadpool instead.
     @contextmanager
     def _get_idle_socket(self) -> Iterator[zmq.Socket]:
         """Get an idle socket for the requesting thread. Block until a socket
@@ -157,7 +156,7 @@ class ZMQRPCClient:
         yield socket
         # Release the socket.
         with self._socket_allocator_lock:
-            self._socket_pool_fifo.append(socket)
+            self._socket_pool_fifo.appendleft(socket)
             del self._thread_to_socket[thread_id]
 
     def get_write_token_owner(self) -> str | None:
@@ -208,7 +207,7 @@ class ZMQRPCClient:
     def release_write_token(self):
         # Idempotent Case:
         if self._write_token is None:
-            self.log.error("No write token to release.")
+            self.log.debug("No write token to release.")
             return
         try:
             # This named call will raise an exception if the write token is
@@ -268,7 +267,7 @@ class ZMQRPCClient:
             # * if the server is down
         except (PermissionError, RouterServerDisconnectedError):
             pass
-        self.socket.disable_monitor()
+        self._socket_pool_fifo[0].disable_monitor()
         self.monitor_thread.join()
         self.monitor_socket.close()
         for socket in self._socket_pool_fifo:
