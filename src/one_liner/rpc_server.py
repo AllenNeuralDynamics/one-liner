@@ -308,7 +308,7 @@ class ZMQRPCServer:
             self.log.error(error_msg)
             raise AttributeError(error_msg) from e
         try:
-            debug_msg = (f"Calling: {obj_name}.{attr_name}("
+            debug_msg = (f"Thread {get_ident()} Calling: {obj_name}.{attr_name}("
                          f"{', '.join([str(a) for a in args])}"
                          f"{', ' if (len(args) and len(kwargs)) else ''}"
                          f"{', '.join([str(k) + '=' + str(v) for k, v in kwargs.items()])})")

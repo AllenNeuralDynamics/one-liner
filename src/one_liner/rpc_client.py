@@ -124,11 +124,10 @@ class ZMQRPCClient:
                 timeout_elapsed = (False if timeout_s is None else
                     (perf_counter() - start_time_s) > timeout_s)
                 try:
-                    with self._get_idle_socket() as socket:
-                        success, timestamp, data = _recv(socket, deserializer=deserializer)
-                        if not success:
-                            raise RPCException(data) # data contains exception string.
-                        return timestamp, data
+                    success, timestamp, data = _recv(socket, deserializer=deserializer)
+                    if not success:
+                        raise RPCException(data) # data contains exception string.
+                    return timestamp, data
                 except zmq.Again:
                     if not self.is_connected():
                         error_msg = ("Did not get a reply from called function! "
