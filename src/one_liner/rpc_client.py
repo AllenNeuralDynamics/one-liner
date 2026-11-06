@@ -20,7 +20,7 @@ class ZMQRPCClient:
     __slots__ = ("context", "socket", "monitor_socket", "monitor_thread", "address",
                  "name", "_connected", "_socket_pool_fifo", "_thread_to_socket",
                  "_socket_allocator_lock", "_write_token", "log",
-                 "_default_rcv_timeout_ms")
+                 "_default_rcv_timeout_ms", "_monitor_origin_socket")
 
     INNER_RECV_POLL_INTERVAL_MS = 500
     WRITE_TOKEN_RETRY_INTERVAL_S = 0.1
@@ -50,10 +50,11 @@ class ZMQRPCClient:
             socket.setsockopt(zmq.RCVTIMEO, self.__class__.INNER_RECV_POLL_INTERVAL_MS)
             self._socket_pool_fifo.append(socket)
         self.address = f"{protocol}://{interface}:{port}"
-        # Get monitor socket before connecting main socket.
-        # Monitor socket can connect to any socket in the pool since they're all
-        # connecting to the same destination.
-        self.monitor_socket = self._socket_pool_fifo[0].get_monitor_socket(zmq.EVENT_ALL)
+        # Get monitor socket before making the remote connection.
+        # Monitor socket can connect to any socket in the pool since they all
+        # connect to the same destination. Track it so we can cleanup correctly.
+        self._monitor_origin_socket = self._socket_pool_fifo[0]
+        self.monitor_socket = self._monitor_origin_socket.get_monitor_socket(zmq.EVENT_ALL)
         self.monitor_socket.setsockopt(zmq.LINGER, 0)
         self.monitor_thread = Thread(target=self._monitor_request_socket, daemon=True)
         self.monitor_thread.start()
@@ -153,11 +154,13 @@ class ZMQRPCClient:
         with self._socket_allocator_lock:
             socket = self._socket_pool_fifo.popleft()
             self._thread_to_socket[thread_id] = socket
-        yield socket
-        # Release the socket.
-        with self._socket_allocator_lock:
-            self._socket_pool_fifo.appendleft(socket)
-            del self._thread_to_socket[thread_id]
+        try:
+            yield socket
+        # Always release the socket, even if an exception was raised.
+        finally:
+            with self._socket_allocator_lock:
+                self._socket_pool_fifo.appendleft(socket)
+                del self._thread_to_socket[thread_id]
 
     def get_write_token_owner(self) -> str | None:
         return self.call("__rpc_server", "get_write_token_owner")[-1]
@@ -267,11 +270,11 @@ class ZMQRPCClient:
             # * if the server is down
         except (PermissionError, RouterServerDisconnectedError):
             pass
-        self._socket_pool_fifo[0].disable_monitor()
+        self._monitor_origin_socket.disable_monitor()
         self.monitor_thread.join()
         self.monitor_socket.close()
         for socket in self._socket_pool_fifo:
             socket.close()
         # Also shutdown any in-use connections.
-        for req_thread, socket in self._thread_to_socket:
+        for socket in self._thread_to_socket.values():
             socket.close()
