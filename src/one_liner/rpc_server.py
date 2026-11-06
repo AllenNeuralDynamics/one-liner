@@ -19,6 +19,15 @@ class ZMQRPCServer:
 
     NUM_RECEIVE_THREADS = 8
 
+    __slots__ = (
+        "log", "port", "context", "_context_managed_externally",
+        "_threadpool", "_recv_sockets", "_address", "_worker_address",
+        "_keep_receiving", "_proxy_thread", "_rpc_proxy_ctrl_socket",
+        "_rpc_proxy_ctrl_address", "instances", "named_call_signatures",
+        "named_call_access_types", "obj_attr_access_types", "_write_token",
+        "_write_token_owner", "_recv_write_token",
+    )
+
     def __init__(self, protocol: Protocol = "tcp", interface: str = "*",
                  port: str = "5555", context: zmq.Context | None = None,
                  instances: dict[str, Any] | None = None):
