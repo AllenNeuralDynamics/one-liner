@@ -152,10 +152,13 @@ def test_context_manager_get_token_after_release():
             sleep(0.1)
 
     # Start client0 task that will eventually give up the write token.
-    client0_task = Thread(target=client0_do_bounded_work, daemon=True).start()
-
+    client0_task = Thread(target=client0_do_bounded_work, daemon=True)
+    client0_task.start()
+    # Wait for client[0] to actually grab the token.
+    while not clients[0].has_write_token():
+        sleep(0.001)
     # Client1 should now wait for write token but eventually get it.
-    with clients[1].lock_write_token(timeout_s=0.2):
+    with clients[1].lock_write_token(timeout_s=0.5):
         print("Client1 got write token!")
 
     for client in clients:

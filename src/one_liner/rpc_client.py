@@ -217,7 +217,7 @@ class ZMQRPCClient:
             # invalid because it has "set" access_type.
             self.call_by_name("__release_write_token")
         except RPCException:
-            msg = "Cannot release the write token! Token owner has changed!"
+            msg = "Releasing write token, but token owner has changed!"
             self.log.error(msg)
             raise PermissionError(msg)
         except RouterServerDisconnectedError:
