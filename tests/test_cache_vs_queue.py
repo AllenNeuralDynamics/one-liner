@@ -77,7 +77,6 @@ def test_caching_option():
     finally:
         server.close()
         client.close()
-        zmq.Context.instance().term()
 
 
 def test_get_last_sent_value():
@@ -114,4 +113,3 @@ def test_get_last_sent_value():
     finally:
         server.close()
         client.close()
-        zmq.Context.instance().term()
