@@ -8,7 +8,7 @@
 a ZMQ-based Router pattern for interacting with remote python objects.
 
 ## High level features:
-* Remote execution of Python code
+* Thread-safe remote execution of Python code
 * Streaming of periodically called functions with the ability to enable/disable them
 * caching and queuing options for receiving only relevant data from `RouterClient`
 * Multiple topologies supported between `RouterServer` and `RouterClient` communication including
@@ -296,6 +296,33 @@ It is also OK to connect multiple `RouterClient`s to a single `RouterServer` lik
 > [!WARNING]
 > There are no restrictions for connecting multiple clients at this level.
 > Any restrictions or limitations on what functions can be called when multiple clients are connected needs to be applied at a higher level.
+
+### Thread-Safe Remote Procedure Call Architecture
+From the client side, issuing a remote procedure call with `call()` or `call_by_name()` is both thread safe and happens concurrently on the server side.
+
+This architecture is based on the ZMQ [Load Balancing Broker](https://zguide.zeromq.org/docs/chapter3/#A-Load-Balancing-Message-Broker) pattern.
+
+On the client side, invoking `call()` will still block until the remotely executed function returns, but this function safely can be invoked concurrently from multiple threads.
+
+Under the hood there are two threadpools, one on the client side to make multiple requests, one per thread, and one on the server side to handle multiple requests concurrently.
+If the user requests more concurrent connections than are currently available, subsequent threads will block until a worker is available.
+This behavior preserves API functionality.
+
+The server-side worker threadpool is load balanced with an LRU (least recently used) strategy.
+That means clients can keep requesting asynchronous work, and the server will allocate the least-recently-used worker thread to handle the reply until there are no more idle workers.
+
+The overall RPC architecture looks like this:
+
+<div align="center">
+<img src="./assets/nonblocking_rpc_strategy.drawio.png" width="800px">
+</div>
+
+Note that the server-side worker sockets are REQ sockets, *not* REP sockets.
+This is because they need to tell the internal backend ROUTER socket that they are done handling the previous request and ready for more work.
+Despite being REQ sockets, their behavior emulates REP sockets when sending data back to the client side.
+
+Finally, note that sockets in both the client and server-side threadpools are long-lived and reused when their previous work is done.
+This is to bypass the overhead of dynamically creating and tearing down a new socket for every new request.
 
 
 ### Streamer
