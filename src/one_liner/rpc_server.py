@@ -4,10 +4,11 @@ import pickle
 
 import secrets
 import zmq
+from concurrent.futures import ThreadPoolExecutor
 from one_liner.utils import _send, Protocol, get_func_sig_json_schema
 from one_liner.models import AccessType
 from one_liner.socket_metadata_schema import RPC
-from threading import Thread, Event
+from threading import Thread, Event, get_ident
 from typing import Any
 
 
@@ -16,23 +17,42 @@ class ZMQRPCServer:
     object instances, and dispatch the serialized result to the connected
     RPC Client."""
 
+    NUM_WORKER_THREADS = 8
+
+    __slots__ = (
+        "log", "port", "context", "_context_managed_externally",
+        "_threadpool", "_recv_sockets", "_address", "_worker_address",
+        "_keep_receiving", "_rpc_broker_thread", "instances",
+        "named_call_signatures", "_num_worker_threads",
+        "named_call_access_types", "obj_attr_access_types", "_write_token",
+        "_write_token_owner", "_worker_received_write_tokens",
+    )
+
     def __init__(self, protocol: Protocol = "tcp", interface: str = "*",
-                 port: str = "5555", context: zmq.Context = None,
-                 instances: dict[str, Any] = None):
+                 port: str = "5555", context: zmq.Context | None = None,
+                 instances: dict[str, Any] | None = None,
+                 num_worker_threads = NUM_WORKER_THREADS):
         self.log = logging.getLogger(self.__class__.__name__)
         self.port = port
         self.context = context or zmq.Context.instance()
         self._context_managed_externally = ((context is not None) or
                                             (self.context is zmq.Context.instance()))
-        self.socket = self.context.socket(zmq.REP)
-        self.socket.setsockopt(zmq.RCVTIMEO, 100)  # timeout for recv() in [ms].
-                                                   # >0 but value is kinda arbitrary.
-        self.socket.setsockopt(zmq.LINGER, 0)  # close immediately when context terminates
-        address = f"{protocol}://{interface}:{self.port}"
-        self.socket.bind(address)
+        # Create a pool of threads and sockets available to receive requests.
+        self._threadpool: ThreadPoolExecutor | None = None
+        self._recv_sockets = []
+        self._num_worker_threads = num_worker_threads
+        for i in range(self._num_worker_threads):
+            socket = self.context.socket(zmq.REQ)
+            socket.setsockopt(zmq.RCVTIMEO, 100)  # timeout for recv() in [ms].
+                                              # >0 but value is kinda arbitrary.
+            socket.setsockopt(zmq.LINGER, 0)  # close immediately when context terminates
+            self._recv_sockets.append(socket)
+        self._address = f"{protocol}://{interface}:{self.port}"
+        self._worker_address = f"inproc://workers:{id(self)}"  # unique per instance
         self._keep_receiving = Event()
         self._keep_receiving.set()
-        self._receive_thread: Thread = None
+        self._rpc_broker_thread: Thread | None = None
+
         self.instances: dict[str, Any] = {} if instances is None else instances
         self.instances.update({"__rpc_server": self})
         self.named_call_signatures = {}
@@ -40,7 +60,8 @@ class ZMQRPCServer:
         self.obj_attr_access_types = {}  # Same as above except by obj/attr
         self._write_token: str | None = None
         self._write_token_owner: str | None = None
-        self._recv_write_token: str | None = None  # most recent request's write token
+        # Keep track of received write tokens received by each worker thread.
+        self._worker_received_write_tokens: dict[int, str | None] = {}
 
         # Make releasing the write token a named call so it respects write access
         # i.e: non-token owners cannot release the write token.
@@ -58,31 +79,94 @@ class ZMQRPCServer:
     def run(self):
         """Launch thread to execute RPCs."""
         self._keep_receiving.set()
-        self._receive_thread = Thread(target=self._receive_worker,
-                                     name=f"REQ_receive_worker",
-                                     daemon=True)
-        self._receive_thread.start()
+        # Launch ROUTER-ROUTER ZMQ Broker
+        self._rpc_broker_thread = Thread(target=self._rpc_broker_worker,
+            name=f"rpc_broker_worker",
+            daemon=True)
+        self._rpc_broker_thread.start()
+        # Launch receive worker threads.
+        self._threadpool = ThreadPoolExecutor(
+            max_workers=self._num_worker_threads)
+        for i in range(self._num_worker_threads):
+            # Will block until the broker is up.
+            self._recv_sockets[i].connect(self._worker_address)
+            self._threadpool.submit(self._receive_worker, self._recv_sockets[i])
 
-    def _receive_worker(self):
+
+    def _rpc_broker_worker(self):
+        """Launch and run the load-sharing broker."""
+        # Note: ROUTER protocol automatically prepends sender Identity
+        frontend = self.context.socket(zmq.ROUTER)
+        frontend.setsockopt(zmq.LINGER, 0) # Close when zmq context terminates.
+        frontend.bind(self._address)
+        backend = self.context.socket(zmq.ROUTER)
+        backend.setsockopt(zmq.LINGER, 0) # Close when zmq context terminates.
+        backend.bind(self._worker_address)
+        available_workers = []
+        # Initialize poller to monitor frontend/backend sockets asynchronously.
+        poller = zmq.Poller()
+        poller.register(backend, zmq.POLLIN)
+        poller.register(frontend, zmq.POLLIN)
+        while self._keep_receiving.is_set():
+            sockets_with_data = dict(poller.poll(timeout=100))
+            # Handle worker (a) requests for work or (b) replies from finished work
+            if backend in sockets_with_data:
+                # packet structure is: [worker_addr, b"", payload]
+                #   where payload structure is: [b"READY"] OR [client_addr, b"", reply_payload]
+                packet = backend.recv_multipart()
+                worker_addr, _, *msg = packet
+                # This worker is now ready for more work.
+                available_workers.append(worker_addr)
+                # Dismiss initial work request.
+                if msg[0] != b"READY":
+                    # Forward reply back to the designated client through frontend
+                    # msg structure is: [Client_Addr, Empty, Payload]
+                    frontend.send_multipart(msg)
+            # Dispatch frontend requests for work to the backend
+            if frontend in sockets_with_data and available_workers:
+                # Pop the least recently used idle worker
+                worker_id = available_workers.pop(0)
+                # Receive the message from the client
+                # ROUTER output format: [client_addr, b"", req_payload]
+                client_msg = frontend.recv_multipart()
+                # Send work request to the idle worker in the backend.
+                # Additionally prepend the idle worker's identity as destination
+                # for backend ROUTER to send it to.
+                backend.send_multipart([worker_id, b""] + client_msg)
+        self.log.debug("RPC proxy exited.")
+
+    def _receive_worker(self, socket):
         """Wait for requests, call requested function, and return the reply.
         Launched in a thread.
         """
+        thread_id = get_ident()
+        self.log.debug(f"Starting Worker thread {thread_id}")
+        # Request work from the backend broker.
+        # We only have to do this once because subsequent replies to previous
+        # work imply that the worker is ready again.
+        socket.send(b"READY")
         while self._keep_receiving.is_set():
             try:
-                pickled_request = self.socket.recv()
+                address, _, pickled_request = socket.recv_multipart()
             except zmq.Again:
                 continue
             request = pickle.loads(pickled_request)
-            # FYI: write_token can be empty string if requester doesn't have it.
-            # _get_write_token does not have an access_type, so we
+            # FYI: write_token can be None if requester doesn't have it.
+            # _get_write_token() does not have an access_type, so we
             #   can always call it.
-            self._recv_write_token, obj_name, attr_name, args, kwargs = request
+            (self._worker_received_write_tokens[thread_id], obj_name, attr_name,
+                args, kwargs) = request
+            success = False
             try:
                 reply = self._call(obj_name=obj_name, attr_name=attr_name,
                                    args=args, kwargs=kwargs)
-                _send(self.socket, name="", data=reply, success=True)
+                success = True
             except Exception as e:
-                _send(self.socket, name="", data=str(e), success=False)
+                reply = str(e)
+            # Manually construct multipart message.
+            socket.send(address, flags=zmq.SNDMORE) # recipient address.
+            socket.send(b"", flags=zmq.SNDMORE)  # REQ delimiter.
+            _send(socket, name="", data=reply, success=success)
 
     def _get_rpc_from_named_calls(self, named_call: str) -> RPC:
         """
@@ -254,8 +338,11 @@ class ZMQRPCServer:
         """Call the object attribute with the specified args/kwargs and return
         the result."""
 
+        # Deduce which thread we are in to figure out corresponding write token.
+        thread_id = get_ident()
+        received_write_token = self._worker_received_write_tokens.get(thread_id, None)
         access_type = self.obj_attr_access_types.get((obj_name, attr_name), None)
-        if access_type == "set" and self._recv_write_token != self._write_token:
+        if access_type == "set" and received_write_token != self._write_token:
             raise PermissionError("Cannot mutate local state with incorrect write token.")
         args = [] if args is None else args
         kwargs = {} if kwargs is None else kwargs
@@ -272,7 +359,7 @@ class ZMQRPCServer:
             self.log.error(error_msg)
             raise AttributeError(error_msg) from e
         try:
-            debug_msg = (f"Calling: {obj_name}.{attr_name}("
+            debug_msg = (f"Thread {get_ident()} Calling: {obj_name}.{attr_name}("
                          f"{', '.join([str(a) for a in args])}"
                          f"{', ' if (len(args) and len(kwargs)) else ''}"
                          f"{', '.join([str(k) + '=' + str(v) for k, v in kwargs.items()])})")
@@ -288,10 +375,9 @@ class ZMQRPCServer:
             raise e
 
     def close(self):
-        self._keep_receiving.clear()
-        # _receive_thread is only created by run(); may be None if never started.
-        if self._receive_thread is not None:
-            self._receive_thread.join()
-        self.socket.close()
+        # _threadpool is only created by run(); may be None if never started.
+        if self._threadpool:
+            self._keep_receiving.clear()
+            self._threadpool.shutdown(wait=True)
         if not self._context_managed_externally:
             self.context.term()
