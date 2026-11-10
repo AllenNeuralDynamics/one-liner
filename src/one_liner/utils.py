@@ -28,7 +28,7 @@ DESERIALIZERS: dict[Encoding, Callable] = \
     }
 
 
-def _send(socket: zmq.Context.socket, name: str, data: bytes | Any,
+def _send(socket: zmq.Socket, name: str, data: bytes | Any,
           timestamp: float = None, success: bool = True,
           serializer: Encoding | Callable = "pickle"):
     """Send the data on tne specified socket prefixed with the specified
@@ -68,7 +68,7 @@ def _send(socket: zmq.Context.socket, name: str, data: bytes | Any,
     socket.send(packet, copy=False)
 
 
-def _recv(socket: zmq.Context.socket, flag: zmq.Flag = 0, prefix: str | None = None,
+def _recv(socket: zmq.Socket, flag: zmq.Flag = 0, prefix: str | None = None,
           deserializer: Encoding | Callable = "pickle") -> Tuple[bool, float, Any]:
     """Receive data from a zmq socket and deserialize it.
 
@@ -89,17 +89,17 @@ def _recv(socket: zmq.Context.socket, flag: zmq.Flag = 0, prefix: str | None = N
     return success, timestamp, data
 
 
-def get_func_sig_json_schema(func: Callable, default_args: list = [], 
+def get_func_sig_json_schema(func: Callable, default_args: list = [],
                              default_kwargs: dict = {}) -> dict:
     """
-    Get the JSON schema for the parameters and return type of a function as well 
-    as the docstring description. 
-    
-    NOTE: utilizes jsonref library to resolve any $ref references in the schema. 
+    Get the JSON schema for the parameters and return type of a function as well
+    as the docstring description.
+
+    NOTE: utilizes jsonref library to resolve any $ref references in the schema.
     Since each schema is generated from its own function signature, there aren't
-    any shared references between schemas, so this is a safe operation. 
-    Plus this simplifies converting schemas -> models. 
-    Pydantic may support this natively in the future according to these issues: 
+    any shared references between schemas, so this is a safe operation.
+    Plus this simplifies converting schemas -> models.
+    Pydantic may support this natively in the future according to these issues:
     https://github.com/pydantic/pydantic/issues/889
     https://github.com/pydantic/pydantic/issues/12023
     """
@@ -122,7 +122,7 @@ def get_func_sig_json_schema(func: Callable, default_args: list = [],
             continue
         annotation = param.annotation
         if param_name in default_param_values:
-            # Default values from RouterServer 
+            # Default values from RouterServer
             default = default_param_values[param_name]
         elif param.default is not inspect.Parameter.empty:
             # Default values from function signature
@@ -134,7 +134,7 @@ def get_func_sig_json_schema(func: Callable, default_args: list = [],
             fields[param_name] = (Any, Field(default, description="Type unspecified — provide a value."))
         else:
             fields[param_name] = (annotation, default)
-    # Build pydantic model with per-parameter fields with default values and `required`. 
+    # Build pydantic model with per-parameter fields with default values and `required`.
     params_model = create_model(f"{func.__name__}_params", **fields)
     params_schema = params_model.model_json_schema()
 
