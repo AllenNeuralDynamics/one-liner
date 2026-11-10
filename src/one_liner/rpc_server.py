@@ -17,20 +17,21 @@ class ZMQRPCServer:
     object instances, and dispatch the serialized result to the connected
     RPC Client."""
 
-    NUM_RECEIVE_THREADS = 8
+    NUM_WORKER_THREADS = 8
 
     __slots__ = (
         "log", "port", "context", "_context_managed_externally",
         "_threadpool", "_recv_sockets", "_address", "_worker_address",
-        "_keep_receiving", "_rpc_handler_thread", "instances",
-        "named_call_signatures",
+        "_keep_receiving", "_rpc_broker_thread", "instances",
+        "named_call_signatures", "_num_worker_threads",
         "named_call_access_types", "obj_attr_access_types", "_write_token",
         "_write_token_owner", "_worker_received_write_tokens",
     )
 
     def __init__(self, protocol: Protocol = "tcp", interface: str = "*",
                  port: str = "5555", context: zmq.Context | None = None,
-                 instances: dict[str, Any] | None = None):
+                 instances: dict[str, Any] | None = None,
+                 num_worker_threads = NUM_WORKER_THREADS):
         self.log = logging.getLogger(self.__class__.__name__)
         self.port = port
         self.context = context or zmq.Context.instance()
@@ -39,7 +40,8 @@ class ZMQRPCServer:
         # Create a pool of threads and sockets available to receive requests.
         self._threadpool: ThreadPoolExecutor | None = None
         self._recv_sockets = []
-        for i in range(self.__class__.NUM_RECEIVE_THREADS):
+        self._num_worker_threads = num_worker_threads
+        for i in range(self._num_worker_threads):
             socket = self.context.socket(zmq.REQ)
             socket.setsockopt(zmq.RCVTIMEO, 100)  # timeout for recv() in [ms].
                                               # >0 but value is kinda arbitrary.
@@ -49,7 +51,7 @@ class ZMQRPCServer:
         self._worker_address = f"inproc://workers:{id(self)}"  # unique per instance
         self._keep_receiving = Event()
         self._keep_receiving.set()
-        self._rpc_handler_thread: Thread | None = None
+        self._rpc_broker_thread: Thread | None = None
 
         self.instances: dict[str, Any] = {} if instances is None else instances
         self.instances.update({"__rpc_server": self})
@@ -77,15 +79,15 @@ class ZMQRPCServer:
     def run(self):
         """Launch thread to execute RPCs."""
         self._keep_receiving.set()
-        # Launch ROUTER-DEALER ZMQ Proxy
-        self._rpc_handler_thread = Thread(target=self._rpc_broker_worker,
+        # Launch ROUTER-ROUTER ZMQ Broker
+        self._rpc_broker_thread = Thread(target=self._rpc_broker_worker,
             name=f"rpc_broker_worker",
             daemon=True)
-        self._rpc_handler_thread.start()
+        self._rpc_broker_thread.start()
         # Launch receive worker threads.
         self._threadpool = ThreadPoolExecutor(
-            max_workers=self.__class__.NUM_RECEIVE_THREADS)
-        for i in range(self.__class__.NUM_RECEIVE_THREADS):
+            max_workers=self._num_worker_threads)
+        for i in range(self._num_worker_threads):
             # Will block until the broker is up.
             self._recv_sockets[i].connect(self._worker_address)
             self._threadpool.submit(self._receive_worker, self._recv_sockets[i])
@@ -95,13 +97,13 @@ class ZMQRPCServer:
         """Launch and run the load-sharing broker."""
         # Note: ROUTER protocol automatically prepends sender Identity
         frontend = self.context.socket(zmq.ROUTER)
-        frontend.setsockopt(zmq.LINGER, 0) # Close as soon as the context terminates.
+        frontend.setsockopt(zmq.LINGER, 0) # Close when zmq context terminates.
         frontend.bind(self._address)
         backend = self.context.socket(zmq.ROUTER)
-        backend.setsockopt(zmq.LINGER, 0) # Close as soon as the context terminates.
+        backend.setsockopt(zmq.LINGER, 0) # Close when zmq context terminates.
         backend.bind(self._worker_address)
         available_workers = []
-        # Initialize poller to monitor both sockets asynchronously
+        # Initialize poller to monitor frontend/backend sockets asynchronously.
         poller = zmq.Poller()
         poller.register(backend, zmq.POLLIN)
         poller.register(frontend, zmq.POLLIN)
@@ -149,7 +151,7 @@ class ZMQRPCServer:
             except zmq.Again:
                 continue
             request = pickle.loads(pickled_request)
-            # FYI: write_token can be empty string if requester doesn't have it.
+            # FYI: write_token can be None if requester doesn't have it.
             # _get_write_token() does not have an access_type, so we
             #   can always call it.
             (self._worker_received_write_tokens[thread_id], obj_name, attr_name,
