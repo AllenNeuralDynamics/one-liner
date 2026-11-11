@@ -254,13 +254,13 @@ Now, just like before, a connected client can `client.call("my_horn", "beep")` l
 ## Restricting "Write" Access
 RPCs exposed from a `RouterClient` support an optional annotation to mark whether the function implementation alters state.
 Marking a function as `get` hints that the function implements "read-only-like" behavior, while a `set` hints that the function applies "write-like" behavior that mutates the remote object's state.
-These `get`/`set` annotations only apply to `named calls` (i.e: not `streams`).
+These `get`/`set` annotations only apply to `named_calls` (i.e: not `streams`).
 
 ### Write Token
-Functions marked as `set` can only be accessed by one `RouterClient` with the "write token."
+Functions marked as `set` can only be accessed by the `RouterClient` with the "write token."
 After creating a `RouterClient`, you can request the write token with `get_write_token()`.
 Only one `RouterClient` instance at a time can hold the write token, giving it access to the `set` methods.
-Conceptually, write-token based write access implements mutual exclusion similar to a mutex lock.
+Conceptually, write-token-based write access implements mutual exclusion similar to a mutex lock.
 
 ```python
 server = RouterServer()
@@ -284,18 +284,13 @@ client2.get_write_token(force=True)  # This client booted other clients off.
 High level, the `RouterServer` and `RouterClient` support two ways of sending and receiving data remotely.
 
 <div align="center">
-<img src="./assets/one_liner_socket_architecture.png" width="240px">
+<img src="./assets/req_rep_architecture.drawio.png" width="400px">
 </div>
 
 It is also OK to connect multiple `RouterClient`s to a single `RouterServer` like so:
 <div align="center">
-<img src="./assets/many_sub_socket_architecture.png" width="550px">
+<img src="./assets/many_sub_socket_architecture.drawio.png" width="550px">
 </div>
-
-
-> [!WARNING]
-> There are no restrictions for connecting multiple clients at this level.
-> Any restrictions or limitations on what functions can be called when multiple clients are connected needs to be applied at a higher level.
 
 ### Thread-Safe Remote Procedure Call Architecture
 From the client side, issuing a remote procedure call with `call()` or `call_by_name()` is both thread safe and happens concurrently on the server side.
