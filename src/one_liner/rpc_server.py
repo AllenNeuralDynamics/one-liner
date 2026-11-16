@@ -4,7 +4,6 @@ import pickle
 
 import secrets
 import zmq
-from concurrent.futures import ThreadPoolExecutor
 from one_liner.utils import _send, Protocol, get_func_sig_json_schema
 from one_liner.models import AccessType
 from one_liner.socket_metadata_schema import RPC
@@ -38,13 +37,15 @@ class ZMQRPCServer:
         self._context_managed_externally = ((context is not None) or
                                             (self.context is zmq.Context.instance()))
         # Create a pool of threads and sockets available to receive requests.
-        self._threadpool: ThreadPoolExecutor | None = None
+        self._threadpool: list[Thread] = []
         self._recv_sockets = []
         self._num_worker_threads = num_worker_threads
         for i in range(self._num_worker_threads):
             socket = self.context.socket(zmq.REQ)
             socket.setsockopt(zmq.RCVTIMEO, 100)  # timeout for recv() in [ms].
                                               # >0 but value is kinda arbitrary.
+            # Don't block forever replying if broker has already shut down.
+            socket.setsockopt(zmq.SNDTIMEO, 100)
             socket.setsockopt(zmq.LINGER, 0)  # close immediately when context terminates
             self._recv_sockets.append(socket)
         self._address = f"{protocol}://{interface}:{self.port}"
@@ -85,12 +86,13 @@ class ZMQRPCServer:
             daemon=True)
         self._rpc_broker_thread.start()
         # Launch receive worker threads.
-        self._threadpool = ThreadPoolExecutor(
-            max_workers=self._num_worker_threads)
         for i in range(self._num_worker_threads):
             # Will block until the broker is up.
             self._recv_sockets[i].connect(self._worker_address)
-            self._threadpool.submit(self._receive_worker, self._recv_sockets[i])
+            t = Thread(target=self._receive_worker, args=[self._recv_sockets[i]],
+                       name=f"rpc_receive_worker_{i}", daemon=True)
+            t.start()
+            self._threadpool.append(t)
 
 
     def _rpc_broker_worker(self):
@@ -164,9 +166,15 @@ class ZMQRPCServer:
             except Exception as e:
                 reply = str(e)
             # Manually construct multipart message.
-            socket.send(address, flags=zmq.SNDMORE) # recipient address.
-            socket.send(b"", flags=zmq.SNDMORE)  # REQ delimiter.
-            _send(socket, name="", data=reply, success=success)
+            try:
+                socket.send(address, flags=zmq.SNDMORE) # recipient address.
+                socket.send(b"", flags=zmq.SNDMORE)  # REQ delimiter.
+                _send(socket, name="", data=reply, success=success)
+            except zmq.Again:
+                self.log.warning(f"Dropping reply to {obj_name}.{attr_name}(...): "
+                                 "broker is no longer available.")
+                break
+        socket.close()
 
     def _get_rpc_from_named_calls(self, named_call: str) -> RPC:
         """
@@ -374,10 +382,19 @@ class ZMQRPCServer:
             self.log.error(error_msg)
             raise e
 
-    def close(self):
+    def close(self, wait: bool = True):
+        """Close the RPC connection.
+
+        Parameters
+        ----------
+        wait:
+            if True, wait until all pending RPCs have finished executing before
+            closing.
+        """
         # _threadpool is only created by run(); may be None if never started.
         if self._threadpool:
             self._keep_receiving.clear()
-            self._threadpool.shutdown(wait=True)
+        for thread in self._threadpool:
+            thread.join(timeout = None if wait else 0)
         if not self._context_managed_externally:
             self.context.term()

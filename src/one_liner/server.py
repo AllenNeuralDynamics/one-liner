@@ -329,9 +329,16 @@ class RouterServer:
         """Get the server version."""
         return local_version
 
-    def close(self):
-        """Close the RPC and Stream clients."""
-        self.rpc.close()
+    def close(self, wait: bool = True):
+        """Close the RPC and Stream Servers.
+
+        Parameters
+        ----------
+        wait:
+            if True, wait until all pending RPCs have finished executing before
+            closing.
+        """
+        self.rpc.close(wait=wait)
         self.streamer.close()
         if not self._context_managed_externally:
             self.context.term()
