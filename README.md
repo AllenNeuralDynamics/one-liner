@@ -278,6 +278,31 @@ client2 = RouterClient()
 client2.get_write_token(force=True)  # This client booted other clients off.
 ```
 
+### Multi-thread Support
+Invoking RPCs from multiple threads is both thread safe and happens concurrently on the server side.
+
+To get the benefits of parallelism from the client side, split up multiple calls into one thread each.
+
+From [./examples/rpc/nonblocking/client.py](./examples/rpc/nonblocking/client.py)
+```python
+client = RouterClient()
+
+flock = {"Charlie", "Brandi", "Gertrude"}
+
+def make_sheep_sound(sheep_name: str):
+    client.call(f"{sheep_name}", "bleat")
+
+with ThreadPoolExecutor(max_workers=len(flock)) as threadpool:
+    threadpool.map(make_sheep_sound, flock)
+```
+
+Under the hood, the `RouterServer` has a fixed number of worker threads that can excecute a certain number of tasks in parallel.
+There is a limit to the number of concurrent threads that will excecute before additional client-side threads will block while they wait for the `RouterServer` to issue the next available thread worker.
+
+> [!WARNING]
+> Note that server-side object instances *must* be thread safe if the client attempts to call their methods from multiple threads.
+
+
 ## Implementation Details
 
 ### Bird's Eye View
