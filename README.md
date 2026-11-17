@@ -8,7 +8,7 @@
 a ZMQ-based Router pattern for interacting with remote python objects.
 
 ## High level features:
-* Remote execution of Python code
+* Thread-safe remote execution of Python code
 * Streaming of periodically called functions with the ability to enable/disable them
 * caching and queuing options for receiving only relevant data from `RouterClient`
 * Multiple topologies supported between `RouterServer` and `RouterClient` communication including
@@ -254,13 +254,13 @@ Now, just like before, a connected client can `client.call("my_horn", "beep")` l
 ## Restricting "Write" Access
 RPCs exposed from a `RouterClient` support an optional annotation to mark whether the function implementation alters state.
 Marking a function as `get` hints that the function implements "read-only-like" behavior, while a `set` hints that the function applies "write-like" behavior that mutates the remote object's state.
-These `get`/`set` annotations only apply to `named calls` (i.e: not `streams`).
+These `get`/`set` annotations only apply to `named_calls` (i.e: not `streams`).
 
 ### Write Token
-Functions marked as `set` can only be accessed by one `RouterClient` with the "write token."
+Functions marked as `set` can only be accessed by the `RouterClient` with the "write token."
 After creating a `RouterClient`, you can request the write token with `get_write_token()`.
 Only one `RouterClient` instance at a time can hold the write token, giving it access to the `set` methods.
-Conceptually, write-token based write access implements mutual exclusion similar to a mutex lock.
+Conceptually, write-token-based write access implements mutual exclusion similar to a mutex lock.
 
 ```python
 server = RouterServer()
@@ -278,24 +278,71 @@ client2 = RouterClient()
 client2.get_write_token(force=True)  # This client booted other clients off.
 ```
 
+### Multi-thread Support
+Invoking RPCs from multiple threads is both thread safe and happens concurrently on the server side.
+
+To get the benefits of parallelism from the client side, split up multiple calls into one thread each.
+
+From [./examples/rpc/nonblocking/client.py](./examples/rpc/nonblocking/client.py)
+```python
+client = RouterClient()
+
+flock = {"Charlie", "Brandi", "Gertrude"}
+
+def make_sheep_sound(sheep_name: str):
+    client.call(f"{sheep_name}", "bleat")
+
+with ThreadPoolExecutor(max_workers=len(flock)) as threadpool:
+    threadpool.map(make_sheep_sound, flock)
+```
+
+Under the hood, the `RouterServer` has a fixed number of worker threads that can excecute a certain number of tasks in parallel.
+There is a limit to the number of concurrent threads that will excecute before additional client-side threads will block while they wait for the `RouterServer` to issue the next available thread worker.
+
+> [!WARNING]
+> Note that server-side object instances *must* be thread safe if the client attempts to call their methods from multiple threads.
+
+
 ## Implementation Details
 
 ### Bird's Eye View
 High level, the `RouterServer` and `RouterClient` support two ways of sending and receiving data remotely.
 
 <div align="center">
-<img src="./assets/one_liner_socket_architecture.png" width="240px">
+<img src="./assets/req_rep_architecture.drawio.png" width="400px">
 </div>
 
 It is also OK to connect multiple `RouterClient`s to a single `RouterServer` like so:
 <div align="center">
-<img src="./assets/many_sub_socket_architecture.png" width="550px">
+<img src="./assets/many_sub_socket_architecture.drawio.png" width="550px">
 </div>
 
+### Thread-Safe Remote Procedure Call Architecture
+From the client side, issuing a remote procedure call with `call()` or `call_by_name()` is both thread safe and happens concurrently on the server side.
 
-> [!WARNING]
-> There are no restrictions for connecting multiple clients at this level.
-> Any restrictions or limitations on what functions can be called when multiple clients are connected needs to be applied at a higher level.
+This architecture is based on the ZMQ [Load Balancing Broker](https://zguide.zeromq.org/docs/chapter3/#A-Load-Balancing-Message-Broker) pattern.
+
+On the client side, invoking `call()` will still block until the remotely executed function returns, but this function safely can be invoked concurrently from multiple threads.
+
+Under the hood there are two threadpools, one on the client side to make multiple requests, one per thread, and one on the server side to handle multiple requests concurrently.
+If the user requests more concurrent connections than are currently available, subsequent threads will block until a worker is available.
+This behavior preserves API functionality.
+
+The server-side worker threadpool is load balanced with an LRU (least recently used) strategy.
+That means clients can keep requesting asynchronous work, and the server will allocate the least-recently-used worker thread to handle the reply until there are no more idle workers.
+
+The overall RPC architecture looks like this:
+
+<div align="center">
+<img src="./assets/nonblocking_rpc_strategy.drawio.png" width="800px">
+</div>
+
+Note that the server-side worker sockets are REQ sockets, *not* REP sockets.
+This is because they need to tell the internal backend ROUTER socket that they are done handling the previous request and ready for more work.
+Despite being REQ sockets, their behavior emulates REP sockets when sending data back to the client side.
+
+Finally, note that sockets in both the client and server-side threadpools are long-lived and reused when their previous work is done.
+This is to bypass the overhead of dynamically creating and tearing down a new socket for every new request.
 
 
 ### Streamer

@@ -43,7 +43,7 @@ class ZMQStreamServer:
         self._xpub_socket = self._context.socket(zmq.XPUB)
         self._xpub_socket.setsockopt(zmq.LINGER, 0)
         pub_address = f"{protocol}://{interface}:{self.port}"
-        self.log.warning(f"Publishing from: {pub_address}")
+        self.log.debug(f"Publishing from: {pub_address}")
         self._xpub_socket.bind(pub_address)
         self.log.debug(f"Creating zmq proxy to forward messages from: "
                        f"{self._worker_url} to {pub_address}.")
@@ -91,7 +91,7 @@ class ZMQStreamServer:
             # Next line does not return unless the proxy is TERMINATEd.
             zmq.proxy_steerable(self._xpub_socket, self._xsub_socket,
                                 control=self._stream_proxy_ctrl_socket)
-            self.log.debug("Main proxy exited.")
+            self.log.debug("Stream proxy exited.")
         else:  # If we need to return
             self._proxy_thread = Thread(target=self.run, args=[False],
                                         daemon=True)

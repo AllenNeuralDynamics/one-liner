@@ -1,11 +1,8 @@
 #!/usr/bin/env/python3
 
-import zmq
 from random import uniform
 from one_liner.client import ZMQRPCClient
 from one_liner.server import ZMQRPCServer
-from time import sleep
-from time import perf_counter as now
 
 
 # Create a simple class to pass into the server.
@@ -25,7 +22,6 @@ def test_rpc_server_creation():
     server = ZMQRPCServer()
     server.run()
     server.close()
-    zmq.Context.instance().term()
 
 
 def test_request_and_reply():
@@ -41,4 +37,3 @@ def test_request_and_reply():
     finally:
         server.close()
         client.close()
-        zmq.Context.instance().term()

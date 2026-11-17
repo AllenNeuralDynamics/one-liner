@@ -21,7 +21,7 @@ class RouterServer:
                  context: zmq.Context | None = None,
                  instances: dict[str, Any] | None = None,
                  config: RouterServerConfig | dict[str, dict] | None = None,
-                 name: str | None = None):
+                 rpc_worker_threads = ZMQRPCServer.NUM_WORKER_THREADS):
         """ Constructor.
 
         Parameters
@@ -40,6 +40,9 @@ class RouterServer:
             Dict of object instances, keyed by name.
         config:
             optional configuration dict of named calls and streams
+        num_worker_threads:
+            optional number of server side worker threads that can execute RPCs
+            concurrently.
 
         Warnings
         --------
@@ -66,7 +69,8 @@ class RouterServer:
                                "__router_server": self})
         self.rpc = ZMQRPCServer(protocol=protocol, interface=interface,
                                 port=rpc_port, context=self.context,
-                                instances=self.instances)
+                                instances=self.instances,
+                                num_worker_threads=rpc_worker_threads)
         if config is None:
             return
         # Release Stream and RPC server if RouterServer config setup fails
@@ -325,9 +329,16 @@ class RouterServer:
         """Get the server version."""
         return local_version
 
-    def close(self):
-        """Close the RPC and Stream clients."""
-        self.rpc.close()
+    def close(self, wait: bool = True):
+        """Close the RPC and Stream Servers.
+
+        Parameters
+        ----------
+        wait:
+            if True, wait until all pending RPCs have finished executing before
+            closing.
+        """
+        self.rpc.close(wait=wait)
         self.streamer.close()
         if not self._context_managed_externally:
             self.context.term()

@@ -1,7 +1,5 @@
 #!/usr/bin/env/python3
 
-import pytest
-import zmq
 from random import uniform
 from one_liner.client import ZMQStreamClient
 from one_liner.server import ZMQStreamServer
@@ -29,9 +27,6 @@ def test_server_creation():
     server = ZMQStreamServer()  # Create a server.
     server.run()
     server.close()
-    # Debugging: show all open sockets
-    ctx = zmq.Context.instance()
-    zmq.Context.instance().term()
 
 
 def test_server_broadcast():
@@ -43,7 +38,6 @@ def test_server_broadcast():
     server.run()
     sleep(0.05)
     server.close()
-    zmq.Context.instance().term()
 
 
 def test_client_receive():
@@ -64,7 +58,6 @@ def test_client_receive():
     finally:
         client.close()
         server.close()
-        zmq.Context.instance().term()
 
 
 def test_live_add_remove_broadcast():
@@ -85,4 +78,3 @@ def test_live_add_remove_broadcast():
     finally:
         client.close()
         server.close()
-        zmq.Context.instance().term()
