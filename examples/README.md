@@ -10,7 +10,7 @@ Some examples also have a **ctrl_client.py** demonstrating how to enable/disable
 To run these examples, make sure you have all the dependencies installed with:
 
 ```bash
-uv sync --extra examples
+uv sync --group examples
 ```
 
 ## Running these examples
