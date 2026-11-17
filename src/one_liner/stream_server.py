@@ -69,7 +69,7 @@ class ZMQStreamServer:
         self._call_frequencies: dict[str, float] = {}
         self._locks_by_frequency: dict[float, Lock] = {}
         self._threads: dict[float, Thread] = {}
-        self._manual_broadcast_sockets: dict[str, zmq.Context.socket] = {}
+        self._manual_broadcast_sockets: dict[str, zmq.Socket] = {}
         self._manual_broadcast_encodings: dict[str, Encoding] = {}
 
         self._keep_broadcasting: Event = Event()
