@@ -37,28 +37,31 @@ class ZMQRPCClient:
         self._socket_pool_fifo: deque[zmq.Socket] = deque(
             maxlen=self.__class__.DEFAULT_POOL_SIZE)
         for i in range(self.__class__.DEFAULT_POOL_SIZE):
-            socket = self.context.socket(zmq.REQ)
-            # Setup heartbeat settings
-            socket.setsockopt(zmq.HEARTBEAT_IVL, 1000)
-            socket.setsockopt(zmq.HEARTBEAT_TIMEOUT, 2000)
-            socket.setsockopt(zmq.HEARTBEAT_TTL, 2000)
-            socket.setsockopt(zmq.LINGER, 0)
-            # Setup a short inner-loop poll interval.
-            socket.setsockopt(zmq.RCVTIMEO, self.__class__.INNER_RECV_POLL_INTERVAL_MS)
+            socket = self._create_socket()
             self._socket_pool_fifo.append(socket)
         self.address = f"{protocol}://{interface}:{port}"
         # Get monitor socket before making the remote connection.
-        # Monitor socket can connect to any socket in the pool since they all
-        # connect to the same destination. Track it so we can cleanup correctly.
-        self._monitor_origin_socket = self._socket_pool_fifo[0]
+        # Create a long-lived dummy socket for the monitor socket to connect to.
+        self._monitor_origin_socket = self._create_socket()
         self.monitor_socket = self._monitor_origin_socket.get_monitor_socket(zmq.EVENT_ALL)
         self.monitor_socket.setsockopt(zmq.LINGER, 0)
         self.monitor_thread = Thread(target=self._monitor_request_socket, daemon=True)
         self.monitor_thread.start()
         self._connected = Event()
         # Connect all sockets.
-        for socket in self._socket_pool_fifo:
+        for socket in [*self._socket_pool_fifo, self._monitor_origin_socket]:
             socket.connect(self.address)
+
+    def _create_socket(self) -> zmq.Socket:
+        socket = self.context.socket(zmq.REQ)
+        # Setup heartbeat settings
+        socket.setsockopt(zmq.HEARTBEAT_IVL, 1000)
+        socket.setsockopt(zmq.HEARTBEAT_TIMEOUT, 2000)
+        socket.setsockopt(zmq.HEARTBEAT_TTL, 2000)
+        socket.setsockopt(zmq.LINGER, 0)
+        # Setup a short inner-loop poll interval.
+        socket.setsockopt(zmq.RCVTIMEO, self.__class__.INNER_RECV_POLL_INTERVAL_MS)
+        return socket
 
     def _monitor_request_socket(self):
         """Monitor thread to update the connection state."""
@@ -147,7 +150,14 @@ class ZMQRPCClient:
         socket = self._socket_pool_fifo.pop()
         try:
             yield socket
-        # Always release the socket, even if an exception was raised.
+        except TimeoutError:
+            # Close old socket and replace it to handle the broken REQ-REP loop.
+            # (Server-side will silently discard the reply result.)
+            socket.close()
+            socket = self._create_socket()
+            socket.connect(self.address)
+            raise  # Reraise the exception.
+        # Return the socket (same or replacement) to the socket pool.
         finally:
             self._socket_pool_fifo.appendleft(socket)
 
@@ -262,5 +272,6 @@ class ZMQRPCClient:
         self._monitor_origin_socket.disable_monitor()
         self.monitor_thread.join()
         self.monitor_socket.close()
+        self._monitor_origin_socket.close()
         for socket in self._socket_pool_fifo:
             socket.close()
